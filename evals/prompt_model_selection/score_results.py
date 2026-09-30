@@ -11,8 +11,9 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 from collections import defaultdict
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from statistics import mean, median
 from typing import Any, Iterable
 
@@ -21,8 +22,10 @@ TOKEN_BASES = {"provider_usage", "tokenizer_estimate"}
 LATENCY_BASES = {"wall_clock", "estimate"}
 COST_BASES = {"provider_reported", "invoice", "catalog_estimate", "unknown"}
 QUALITY_BASES = {"deterministic", "blind_human"}
-REVISION_PATTERN = re.compile(r"^git-blob-sha1:[0-9a-f]{40}$")
+COMMIT_REVISION_PATTERN = re.compile(r"^git-commit-sha1:([0-9a-f]{40})$")
+BLOB_REVISION_PATTERN = re.compile(r"^git-blob-sha1:([0-9a-f]{40})$")
 DEFAULT_MIN_REPETITIONS = 3
+ARMS_SCHEMA_VERSION = 3
 
 
 def _revision(value: Any) -> str:
@@ -77,6 +80,154 @@ def load_cases(path: Path) -> dict[str, dict[str, Any]]:
     return cases
 
 
+def _git(
+    repository: Path, *args: str, error_context: str
+) -> subprocess.CompletedProcess[str]:
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "--no-replace-objects",
+                "--literal-pathspecs",
+                "-C",
+                str(repository),
+                *args,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        raise ValueError(f"{error_context}: could not execute Git: {exc}") from exc
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "Git command failed"
+        raise ValueError(f"{error_context}: {detail}")
+    return result
+
+
+def _repository_root(manifest_path: Path) -> Path:
+    resolved_manifest = manifest_path.resolve()
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "--no-replace-objects",
+                "--literal-pathspecs",
+                "-C",
+                str(resolved_manifest.parent),
+                "rev-parse",
+                "--show-toplevel",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        raise ValueError(
+            f"{manifest_path}: could not execute Git while resolving repository: {exc}"
+        ) from exc
+    if result.returncode != 0 or not result.stdout.strip():
+        raise ValueError(f"{manifest_path}: must be inside a Git working tree")
+    repository = Path(result.stdout.strip()).resolve()
+    try:
+        resolved_manifest.relative_to(repository)
+    except ValueError as exc:
+        raise ValueError(
+            f"{manifest_path}: must resolve inside its Git working tree"
+        ) from exc
+    return repository
+
+
+def _source_commit(arm_id: str, raw_arm: dict[str, Any], repository: Path) -> str:
+    source_commit = raw_arm.get("source_commit")
+    match = (
+        COMMIT_REVISION_PATTERN.fullmatch(source_commit)
+        if isinstance(source_commit, str)
+        else None
+    )
+    if match is None:
+        raise ValueError(f"{arm_id}: source_commit must use git-commit-sha1:<40 hex>")
+    commit_id = match.group(1)
+    object_type = _git(
+        repository,
+        "cat-file",
+        "-t",
+        commit_id,
+        error_context=f"{arm_id}: source commit {commit_id} is unavailable",
+    ).stdout.strip()
+    if object_type != "commit":
+        raise ValueError(
+            f"{arm_id}: source_commit must identify a commit, got {object_type!r}"
+        )
+    return source_commit
+
+
+def _prompt_source_path(arm_id: str, route_id: str, source: Any) -> str:
+    if not isinstance(source, str) or not source:
+        raise ValueError(f"{arm_id}/{route_id}: prompt source paths must be non-empty")
+    normalized = PurePosixPath(source)
+    if (
+        normalized.is_absolute()
+        or source != normalized.as_posix()
+        or ".." in normalized.parts
+        or "\\" in source
+        or "\x00" in source
+    ):
+        raise ValueError(
+            f"{arm_id}/{route_id}: prompt source must be a normalized "
+            f"repository-relative path: {source!r}"
+        )
+    return source
+
+
+def _verify_prompt_sources(
+    repository: Path,
+    arm_id: str,
+    source_commit: str,
+    prompt_sources: dict[str, str],
+) -> None:
+    commit_id = source_commit.removeprefix("git-commit-sha1:")
+    for source, declared_revision in sorted(prompt_sources.items()):
+        result = _git(
+            repository,
+            "ls-tree",
+            "-z",
+            "--full-tree",
+            commit_id,
+            "--",
+            source,
+            error_context=f"{arm_id}: cannot resolve {source} at {commit_id}",
+        )
+        records = [record for record in result.stdout.split("\0") if record]
+        if len(records) != 1 or "\t" not in records[0]:
+            raise ValueError(
+                f"{arm_id}: {source} is missing or not a file at source commit "
+                f"{commit_id}"
+            )
+        metadata, resolved_source = records[0].split("\t", 1)
+        fields = metadata.split()
+        if len(fields) != 3:
+            raise ValueError(
+                f"{arm_id}: Git returned invalid metadata for {source} at {commit_id}"
+            )
+        mode, object_type, object_id = fields
+        if (
+            resolved_source != source
+            or object_type != "blob"
+            or mode not in {"100644", "100755"}
+        ):
+            raise ValueError(
+                f"{arm_id}: {source} must resolve to a regular Git blob at "
+                f"source commit {commit_id}"
+            )
+        declared_id = declared_revision.removeprefix("git-blob-sha1:")
+        if object_id != declared_id:
+            raise ValueError(
+                f"{arm_id}: declared blob {declared_id} does not match {source} "
+                f"at source commit {commit_id}; Git resolves {object_id}"
+            )
+
+
 def load_arms(path: Path) -> dict[str, Any]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -84,6 +235,11 @@ def load_arms(path: Path) -> dict[str, Any]:
         raise ValueError(f"{path}: invalid JSON: {exc.msg}") from exc
     if not isinstance(raw, dict):
         raise ValueError("arms manifest must be an object")
+    if raw.get("schema_version") != ARMS_SCHEMA_VERSION:
+        raise ValueError(
+            f"schema_version must be {ARMS_SCHEMA_VERSION} for repository-bound provenance"
+        )
+    repository = _repository_root(path)
     study_id = raw.get("study_id")
     if not isinstance(study_id, str) or not study_id:
         raise ValueError("study_id must be a non-empty string")
@@ -104,11 +260,13 @@ def load_arms(path: Path) -> dict[str, Any]:
             raise ValueError("every arm requires a non-empty identifier")
         if not isinstance(raw_arm, dict):
             raise ValueError(f"{arm_id}: arm must be an object")
+        source_commit = _source_commit(arm_id, raw_arm, repository)
         raw_routes = raw_arm.get("routes")
         if not isinstance(raw_routes, dict) or not raw_routes:
             raise ValueError(f"{arm_id}: routes must be a non-empty object")
 
         routes: dict[str, dict[str, Any]] = {}
+        arm_prompt_sources: dict[str, str] = {}
         for route_id, raw_route in raw_routes.items():
             if not isinstance(route_id, str) or not route_id:
                 raise ValueError(
@@ -131,23 +289,33 @@ def load_arms(path: Path) -> dict[str, Any]:
                 raise ValueError(
                     f"{arm_id}/{route_id}: prompt_sources must be a non-empty object"
                 )
-            for source, source_revision in prompt_sources.items():
-                if not isinstance(source, str) or not source:
-                    raise ValueError(
-                        f"{arm_id}/{route_id}: prompt source paths must be non-empty"
-                    )
+            for raw_source, source_revision in prompt_sources.items():
+                source = _prompt_source_path(arm_id, route_id, raw_source)
                 if (
                     not isinstance(source_revision, str)
-                    or REVISION_PATTERN.fullmatch(source_revision) is None
+                    or BLOB_REVISION_PATTERN.fullmatch(source_revision) is None
                 ):
                     raise ValueError(
                         f"{arm_id}/{route_id}: {source} must use git-blob-sha1:<40 hex>"
                     )
-            route["prompt_revision"] = _revision(prompt_sources)
-            route["route_revision"] = _revision(route)
+                previous = arm_prompt_sources.setdefault(source, source_revision)
+                if previous != source_revision:
+                    raise ValueError(
+                        f"{arm_id}: {source} has conflicting prompt-source revisions"
+                    )
+            route["prompt_revision"] = _revision({
+                "source_commit": source_commit,
+                "prompt_sources": prompt_sources,
+            })
+            route["route_revision"] = _revision({
+                "source_commit": source_commit,
+                "route": route,
+            })
             routes[route_id] = route
 
+        _verify_prompt_sources(repository, arm_id, source_commit, arm_prompt_sources)
         arm = dict(raw_arm)
+        arm["source_commit"] = source_commit
         arm["routes"] = routes
         arm["arm_revision"] = _revision(arm)
         arms[arm_id] = arm
@@ -193,6 +361,7 @@ def expected_provenance(
         "fixture_revision": case["fixture_revision"],
         "arm": arm,
         "arm_revision": arm_config["arm_revision"],
+        "source_commit": arm_config["source_commit"],
         "route_id": case["route_id"],
         "route_revision": route["route_revision"],
         "provider": route["provider"],
@@ -355,6 +524,7 @@ def summarize(
     for arm, arm_rows in sorted(by_arm.items()):
         arms[arm] = {
             "arm_revision": study["arms"][arm]["arm_revision"],
+            "source_commit": study["arms"][arm]["source_commit"],
             "runs": len(arm_rows),
             "distinct_cases": len({row["case_id"] for row in arm_rows}),
             "quality_score_by_basis": _summaries_by_basis(

@@ -1,18 +1,19 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "study_id": "hermes-prompt-model-selection-2026-09-29-v1",
   "default_min_repetitions": 3,
   "snapshot_date": "2026-09-29",
   "arms": {
     "current": {
       "description": "Observed default Hermes routing before this change; specialized profiles may differ.",
+      "source_commit": "git-commit-sha1:4546cd40ecb764dd265c38923b227b572b355d32",
       "routes": {
         "curator": {
           "provider": "anthropic",
           "model": "claude-opus-5",
           "reasoning_effort": "high",
           "prompt_sources": {
-            "agent/curator.py": "git-blob-sha1:1a0ce2b6793269871a05e0caa878a2e599180ba6"
+            "agent/curator.py": "git-blob-sha1:5a8a69c94c97c1ab79ade7491c052dfbccf20f60"
           }
         },
         "background_review": {
@@ -20,7 +21,7 @@
           "model": "claude-opus-5",
           "reasoning_effort": "high",
           "prompt_sources": {
-            "agent/background_review.py": "git-blob-sha1:5979b1134b87bc1b4968dd934be727f26d2e7ad8"
+            "agent/background_review.py": "git-blob-sha1:4045e33a502b69f44cb24f442f8fdc2a0d3be9ad"
           }
         },
         "delegation": {
@@ -29,9 +30,9 @@
           "reasoning_effort": "high",
           "max_iterations": 250,
           "prompt_sources": {
-            "tools/delegate_tool.py": "git-blob-sha1:3d5b11019fe1acd14758f735c1f18096cc37e725",
-            "tools/delegate_tool_progress.py": "git-blob-sha1:cf0121876d9abb403ae75e35f1c4d2b7d7221b1f",
-            "tools/delegation_output_schema.py": "git-blob-sha1:e3f89929df9f929a3579b741bb7e34b6bce81045"
+            "tools/delegate_tool.py": "git-blob-sha1:f091afdeb0a51213e973251f5c7704549b95a653",
+            "tools/delegate_tool_progress.py": "git-blob-sha1:f5903a1ed96a26276e8d9943aef422787ea9051c",
+            "tools/delegation_output_schema.py": "git-blob-sha1:1f1233289e43d4598a99ccba7d79234bc026b569"
           }
         },
         "moa_aggregation": {
@@ -39,7 +40,7 @@
           "model": "claude-opus-5",
           "reasoning_effort": "high",
           "prompt_sources": {
-            "agent/moa_loop.py": "git-blob-sha1:d0f9a05db2c43dc9f378f045f59055ac6e065656"
+            "agent/moa_loop.py": "git-blob-sha1:141c5e4f4812160a452aee28531fa3a1f82770d0"
           }
         },
         "smart_approval": {
@@ -47,7 +48,7 @@
           "model": "claude-opus-5",
           "reasoning_effort": "high",
           "prompt_sources": {
-            "tools/approval_smart.py": "git-blob-sha1:f705daa3ca1cef29267213e75cedfa3a99fb8512"
+            "tools/approval_smart.py": "git-blob-sha1:61a27fb4a01c33dccfe48dac6dae33735c3334ac"
           }
         },
         "goal_judge": {
@@ -55,7 +56,7 @@
           "model": "claude-opus-5",
           "reasoning_effort": "high",
           "prompt_sources": {
-            "hermes_cli/goals.py": "git-blob-sha1:176e4cf0a8547081949460f02e7aa7cb0a07f22b"
+            "hermes_cli/goals.py": "git-blob-sha1:47aa40f165eb4dbd2d67bbcda3e2729f489d7ee9"
           }
         },
         "teams_summary": {
@@ -63,7 +64,7 @@
           "model": "claude-opus-5",
           "reasoning_effort": "high",
           "prompt_sources": {
-            "plugins/teams_pipeline/pipeline.py": "git-blob-sha1:aab24a973ce4f89705d02d29541d7d1d0f249efb"
+            "plugins/teams_pipeline/pipeline.py": "git-blob-sha1:0b370a178060f3c66f52eb2e300b3ca503a8c1f3"
           }
         },
         "kanban_decomposer": {
@@ -71,20 +72,21 @@
           "model": "claude-opus-5",
           "reasoning_effort": "high",
           "prompt_sources": {
-            "hermes_cli/kanban_decompose.py": "git-blob-sha1:ca104307fc8c9ea461213e0587dbce05da2e7ef5"
+            "hermes_cli/kanban_decompose.py": "git-blob-sha1:47d280089ab00a9a9bd0d1325983226181e40a83"
           }
         }
       }
     },
     "proposed": {
       "description": "Candidate quality-first routing; validate before applying broadly.",
+      "source_commit": "git-commit-sha1:a5b9586e654ea7c70d5d85714b8bd4a4eb01ed75",
       "routes": {
         "curator": {
           "provider": "anthropic",
           "model": "claude-sonnet-5",
           "reasoning_effort": "medium",
           "prompt_sources": {
-            "agent/curator.py": "git-blob-sha1:d437f8b660abec64f065ca11a537a833b0aeda3a"
+            "agent/curator.py": "git-blob-sha1:b3c385d5ad42f13c9211c563a6e6da6b8322b85f"
           }
         },
         "background_review": {
@@ -92,7 +94,7 @@
           "model": "claude-sonnet-5",
           "reasoning_effort": "medium",
           "prompt_sources": {
-            "agent/background_review.py": "git-blob-sha1:08e8b5fbf24b23473cb14099ed1b4c789a3bb424"
+            "agent/background_review.py": "git-blob-sha1:5b3e2dc2846bba6bf3732d6f3a755fa2b44e3f4f"
           }
         },
         "delegation": {
@@ -101,9 +103,9 @@
           "reasoning_effort": "medium",
           "max_iterations": 80,
           "prompt_sources": {
-            "tools/delegate_tool.py": "git-blob-sha1:81e0bd81e66ec46267e43226e3e36da3471202a9",
-            "tools/delegate_tool_progress.py": "git-blob-sha1:0d6d9462fedc32039183fc35560062f030f81ea3",
-            "tools/delegation_output_schema.py": "git-blob-sha1:21c9665693cd4625bcdaaf3a46e120ea894b8c01"
+            "tools/delegate_tool.py": "git-blob-sha1:cd1030e4e469869815cd16ce7f2398dbbe4079cc",
+            "tools/delegate_tool_progress.py": "git-blob-sha1:78cad138cd641294bb7f83586d303c7756684682",
+            "tools/delegation_output_schema.py": "git-blob-sha1:7d65dea2a436036b6467b38843bc6642d96c3e1e"
           }
         },
         "moa_aggregation": {
@@ -111,7 +113,7 @@
           "model": "claude-opus-5",
           "reasoning_effort": "high",
           "prompt_sources": {
-            "agent/moa_loop.py": "git-blob-sha1:ae5d73fd3d7177e86b1d007f27e14d4980d1f3fb"
+            "agent/moa_loop.py": "git-blob-sha1:7e4b796bebf78bf85810bf0006745a86e712f340"
           }
         },
         "smart_approval": {
@@ -119,7 +121,7 @@
           "model": "claude-sonnet-5",
           "reasoning_effort": "medium",
           "prompt_sources": {
-            "tools/approval_smart.py": "git-blob-sha1:5ffcbc3f4567468b62cb3f8dae0ae4f495960b37"
+            "tools/approval_smart.py": "git-blob-sha1:f27d06f047fd57bc3d2dc723338a5f600cfe516e"
           }
         },
         "goal_judge": {
@@ -127,7 +129,7 @@
           "model": "claude-sonnet-5",
           "reasoning_effort": "medium",
           "prompt_sources": {
-            "hermes_cli/goals.py": "git-blob-sha1:c20a7e05e02b57cdd8f165610c81bb64bf418c58"
+            "hermes_cli/goals.py": "git-blob-sha1:3621a53eff6dd1687d4db75b17ad05f4b451f94f"
           }
         },
         "teams_summary": {
@@ -135,7 +137,7 @@
           "model": "claude-sonnet-5",
           "reasoning_effort": "medium",
           "prompt_sources": {
-            "plugins/teams_pipeline/pipeline.py": "git-blob-sha1:c7235f6d0a77f68bd57abb986f3c4ef96205a7bb"
+            "plugins/teams_pipeline/pipeline.py": "git-blob-sha1:7a24d764d1d1ed9a566b8588862360b4ce2002c9"
           }
         },
         "kanban_decomposer": {
@@ -143,7 +145,7 @@
           "model": "claude-sonnet-5",
           "reasoning_effort": "medium",
           "prompt_sources": {
-            "hermes_cli/kanban_decompose.py": "git-blob-sha1:b9c55720a60a33757be6007d5c13953357432c2b"
+            "hermes_cli/kanban_decompose.py": "git-blob-sha1:8645f411b85d845af243064e7c9278c1e4f1a324"
           }
         }
       }
