@@ -554,6 +554,35 @@ _AUX_TASK_SLOTS: Tuple[str, ...] = (
 )
 
 
+def _all_aux_task_entries() -> Tuple[Dict[str, Any], ...]:
+    """Dashboard-supported built-ins followed by discovered plugin-owned tasks."""
+    from hermes_cli.main_provider_setup import _AUX_TASKS
+
+    builtin_metadata = {
+        key: {"key": key, "display_name": name, "description": description, "defaults": {}}
+        for key, name, description in _AUX_TASKS
+    }
+    entries = [
+        builtin_metadata.get(
+            key,
+            {"key": key, "display_name": key.replace("_", " ").title(), "description": "", "defaults": {}},
+        )
+        for key in _AUX_TASK_SLOTS
+    ]
+    try:
+        from hermes_cli.plugins import get_plugin_auxiliary_tasks
+
+        entries.extend(get_plugin_auxiliary_tasks())
+    except Exception:
+        _log.debug("Plugin auxiliary-task discovery skipped", exc_info=True)
+    return tuple(entries)
+
+
+def _all_aux_task_slots() -> Tuple[str, ...]:
+    """Task keys accepted by dashboard reads, assignments, stale checks, and reset."""
+    return tuple(entry["key"] for entry in _all_aux_task_entries())
+
+
 def _dashboard_code_skew_guard() -> Optional[str]:
     """Return a "restart required" message when this process runs stale code, else None.
 
@@ -660,7 +689,7 @@ def _stale_aux_pins(cfg: dict, new_provider: str) -> list:
     aux_cfg = cfg.get("auxiliary", {})
     if not isinstance(aux_cfg, dict):
         return stale_aux
-    for slot in _AUX_TASK_SLOTS:
+    for slot in _all_aux_task_slots():
         slot_cfg = aux_cfg.get(slot)
         if not isinstance(slot_cfg, dict):
             continue
@@ -759,7 +788,7 @@ def _apply_aux_assignment_sync(cfg: dict, provider: str, model: str, task: str, 
 
     if task == "__reset__":
         # Reset every slot to provider="auto", model="", no effort override — keeps other fields intact.
-        for slot in _AUX_TASK_SLOTS:
+        for slot in _all_aux_task_slots():
             slot_cfg = _slot(slot)
             slot_cfg["provider"] = "auto"
             slot_cfg["model"] = ""
@@ -774,10 +803,11 @@ def _apply_aux_assignment_sync(cfg: dict, provider: str, model: str, task: str, 
     if not provider:
         raise HTTPException(status_code=400, detail="provider required for auxiliary")
 
-    targets = [task] if task else list(_AUX_TASK_SLOTS)
+    available_slots = _all_aux_task_slots()
+    targets = [task] if task else list(available_slots)
     new_provider = provider.strip().lower()
     for slot in targets:
-        if slot not in _AUX_TASK_SLOTS:
+        if slot not in available_slots:
             raise HTTPException(status_code=400, detail=f"unknown auxiliary task: {slot}")
         slot_cfg = _slot(slot)
         prev_provider = str(slot_cfg.get("provider") or "").strip().lower()

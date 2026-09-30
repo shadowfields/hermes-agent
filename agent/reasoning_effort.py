@@ -27,9 +27,12 @@ EFFORT_LADDER: tuple[str, ...] = ("none", "minimal", "low", "medium", "high", "x
 #: Widest OpenAI-compatible wire vocabulary (OpenRouter, Nous Portal).
 OPENAI_COMPAT_WIRE_EFFORTS: tuple[str, ...] = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 
-#: OpenAI/Codex Responses per model generation (live-verified): ``minimal`` is rejected by
-#: both (clamps to low); ``max`` is gpt-5.6 / gpt-6-tier only (legacy = 5.5 and older).
+#: OpenAI/Codex Responses per model generation. ``minimal`` is rejected by
+#: these models and clamps to low. GPT-6.1 Sol also rejects ``none``; GPT-6
+#: Luna retains the GPT-5.6 vocabulary, including ``none`` and ``max``.
 CODEX_GPT56_EFFORTS: tuple[str, ...] = ("none", "low", "medium", "high", "xhigh", "max")
+CODEX_GPT61_EFFORTS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
+CODEX_GPT6_LUNA_EFFORTS: tuple[str, ...] = ("none", "low", "medium", "high", "xhigh", "max")
 CODEX_LEGACY_EFFORTS: tuple[str, ...] = ("none", "low", "medium", "high", "xhigh")
 # GPT-6 Astra is account-gated and its Responses API accepts no disable/minimal
 # wire level; callers normalize those requests to ``low`` at the transport boundary.
@@ -100,8 +103,12 @@ def is_astra_model(model: Optional[str]) -> bool:
 def codex_supported_efforts(model: Optional[str]) -> tuple[str, ...]:
     """Supported effort set for an OpenAI/Codex Responses model."""
     bare = (model or "").strip().lower().rsplit("/", 1)[-1]
-    if is_astra_model(model) or bare.startswith(NO_DISABLE_TIER_PREFIXES):
+    if is_astra_model(model):
         return CODEX_ASTRA_EFFORTS
+    if bare.startswith(NO_DISABLE_TIER_PREFIXES):
+        return CODEX_GPT61_EFFORTS
+    if bare == "gpt-6-luna" or bare.startswith("gpt-6-luna-"):
+        return CODEX_GPT6_LUNA_EFFORTS
     return (
         CODEX_GPT56_EFFORTS
         if "gpt-5.6" in bare or bare.startswith(GPT6_TIER_PREFIXES) or bare in DAYBREAK_MODEL_IDS

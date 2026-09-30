@@ -15,8 +15,11 @@ supported vocabulary. The policy under test:
 
 import pytest
 
+from hermes_constants import VALID_REASONING_EFFORTS
 from agent.reasoning_effort import (
     CODEX_GPT56_EFFORTS,
+    CODEX_GPT61_EFFORTS,
+    CODEX_GPT6_LUNA_EFFORTS,
     EFFORT_LADDER,
     GLM52_EFFORTS,
     GLM52_OVERRIDES,
@@ -28,7 +31,12 @@ from agent.reasoning_effort import (
     kimi_supported_efforts,
     requested_effort,
 )
-from hermes_constants import VALID_REASONING_EFFORTS
+
+
+def test_main_agent_reasoning_effort_is_part_of_config_schema():
+    from hermes_cli.config_defaults import DEFAULT_CONFIG
+
+    assert DEFAULT_CONFIG["agent"]["reasoning_effort"] == ""
 
 
 class TestLadderContract:
@@ -159,6 +167,23 @@ class TestCodexVocabulary:
         assert clamp_effort("max", CODEX_LEGACY_EFFORTS) == "xhigh"
         assert clamp_effort("ultra", CODEX_LEGACY_EFFORTS) == "xhigh"
         assert clamp_effort("minimal", CODEX_LEGACY_EFFORTS) == "low"
+
+    def test_gpt6_model_specific_disable_support(self):
+        """GPT-6.1 Sol rejects none/minimal while GPT-6 Luna accepts none;
+        both accept max. The transport must clamp without silently disabling."""
+        from agent.reasoning_effort import codex_supported_efforts
+
+        sol = codex_supported_efforts("openai/gpt-6.1-sol")
+        luna = codex_supported_efforts("gpt-6-luna")
+
+        assert sol is CODEX_GPT61_EFFORTS
+        assert clamp_effort("none", sol) == "low"
+        assert clamp_effort("minimal", sol) == "low"
+        assert clamp_effort("max", sol) == "max"
+        assert luna is CODEX_GPT6_LUNA_EFFORTS
+        assert clamp_effort("none", luna) == "none"
+        assert clamp_effort("minimal", luna) == "low"
+        assert clamp_effort("max", luna) == "max"
 
     @pytest.mark.parametrize(
         "model",

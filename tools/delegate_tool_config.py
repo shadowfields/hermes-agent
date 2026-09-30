@@ -559,11 +559,18 @@ def _resolve_child_runtime(
             getattr(parent_agent, "requested_provider", None) or effective_provider
         )
 
-    # Reasoning: delegation.reasoning_effort > parent. Keep the raw value — a
-    # YAML ``false`` must disable thinking, not coerce to "" and inherit.
+    # Reasoning: an internal route such as auxiliary.review may explicitly own
+    # its effort; otherwise preserve delegation.reasoning_effort > parent.
+    # Keep the raw value — YAML ``false`` must disable thinking, not coerce to
+    # "" and inherit.
     child_reasoning = getattr(parent_agent, "reasoning_config", None)
     try:
-        delegation_effort = delegation_cfg.get("reasoning_effort")
+        reasoning_cfg = delegation_cfg
+        if isinstance(routing_cfg, dict):
+            route_effort = routing_cfg.get("reasoning_effort")
+            if route_effort or route_effort is False:
+                reasoning_cfg = routing_cfg
+        delegation_effort = reasoning_cfg.get("reasoning_effort")
         if delegation_effort or delegation_effort is False:
             from hermes_constants import parse_reasoning_effort
             parsed = parse_reasoning_effort(delegation_effort)

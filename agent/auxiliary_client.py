@@ -1502,6 +1502,7 @@ class _CodexCompletionsAdapter:
             resp_kwargs["extra_headers"] = dict(kwargs["extra_headers"])
         # The Codex endpoint rejects max_output_tokens/temperature (400) — omit.
         extra_body = kwargs.get("extra_body") or {}
+        explicit_reasoning_disabled = False
         if isinstance(extra_body, dict):
             # service_tier (fast mode) is a top-level Responses field; xAI's endpoint rejects it.
             service_tier = extra_body.get("service_tier")
@@ -1516,13 +1517,17 @@ class _CodexCompletionsAdapter:
                 from agent.reasoning_effort import clamp_effort
                 from agent.transports.codex import _codex_efforts_for_route
                 supported = _codex_efforts_for_route(model, host, is_codex_backend=route.is_codex_backend)
-                if supported and reasoning_cfg.get("enabled") is not False:
+                if reasoning_cfg.get("enabled") is False:
+                    # The GPT-6 sanitizer needs to distinguish an explicit disable from an unset
+                    # configuration: Luna can retain ``none`` while Sol/Astra clamp it to ``low``.
+                    explicit_reasoning_disabled = True
+                    if "none" in supported and not is_xai:
+                        resp_kwargs["reasoning"] = {"effort": "none"}
+                elif supported:
                     # Truthy-only: Codex 400s on e.g. {"effort": null}, so falsy → default.
                     effort = clamp_effort(reasoning_cfg.get("effort") or "medium", supported)
                     resp_kwargs["reasoning"] = {"effort": effort, "summary": "auto"}
                     resp_kwargs["include"] = ["reasoning.encrypted_content"]
-                elif "none" in supported and not is_xai:
-                    resp_kwargs["reasoning"] = {"effort": "none"}
         if wire_tools:
             resp_kwargs["tools"] = wire_tools
         if wire_aliases:
@@ -1552,7 +1557,10 @@ class _CodexCompletionsAdapter:
             logger.debug("Codex auxiliary: prompt_cache_key derivation skipped", exc_info=True)
         # Last, like the main transport: caller extra_body must not put a rejected Astra field back.
         from agent.transports.codex import _sanitize_astra_request_kwargs
-        _sanitize_astra_request_kwargs(resp_kwargs, model, host)
+        _sanitize_astra_request_kwargs(
+            resp_kwargs, model, host,
+            explicit_reasoning_disabled=explicit_reasoning_disabled,
+        )
         return resp_kwargs, model, timeout
 
     def create(self, **kwargs) -> Any:

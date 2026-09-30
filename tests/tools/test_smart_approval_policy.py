@@ -14,6 +14,7 @@ under test:
 Inspired by ChatGPT Work's customizable auto-review guardian policy.
 """
 
+import json
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -92,13 +93,16 @@ class TestSmartApprovePolicyInjection(unittest.TestCase):
         _smart_approve("rm -rf /etc/nginx", "recursive delete")
 
         messages = _messages_from(mock_call_llm)
+        assert POLICY_TEXT in messages[0]["content"]
+        assert "exact target" in messages[0]["content"].lower()
         assert messages[1]["role"] == "user"
         user_content = messages[1]["content"]
         assert POLICY_TEXT not in user_content
         assert "Additional policy rules from the operator" not in user_content
-        # The command itself must still be there, XML-fenced
-        assert "rm -rf /etc/nginx" in user_content
-        assert "<command>" in user_content
+        # The command itself must still be present as terminal JSON data.
+        _, marker, encoded = user_content.rpartition("UNTRUSTED_COMMAND_DATA_JSON:\n")
+        assert marker
+        assert json.loads(encoded)["command"] == "rm -rf /etc/nginx"
 
     @patch("tools.approval_context._get_approval_config")
     @patch("agent.auxiliary_client.call_llm")

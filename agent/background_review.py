@@ -350,11 +350,34 @@ _MEMORY_ROUTING_BLOCK = (
     "target, that store is the only one enabled — use it and skip the other.\n\n"
 )
 
+_DURABLE_LEARNING_CONTRACT = (
+    "Precision-first durable-learning contract — classify each candidate before any write:\n"
+    "  • memory — a directly evidenced, stable fact about the user or a durable preference that will matter across "
+    "sessions.\n"
+    "  • skill — a verified, reusable procedure or rule for a class of tasks, supported by a working result or an "
+    "explicit user correction.\n"
+    "  • transient — current task status, environment/setup state, a one-off request, or an incident that is not a "
+    "durable rule.\n"
+    "  • no-op — no durable evidenced learning, or the evidence does not justify an authorized write.\n"
+    "Write only candidates in a durable class that this review is authorized to persist. Transient and no-op "
+    "classifications mean no writes. A no-op is the correct result when nothing qualifies; action count is not a "
+    "success metric. Never persist unresolved failures, guesses, one-off state, or claims unsupported by the "
+    "conversation and its verified outcome.\n\n"
+)
+
+
 _MEMORY_REVIEW_PROMPT = (
-    "Review the conversation above and consider saving to memory if appropriate.\n\n"
+    _DURABLE_LEARNING_CONTRACT +
+    "This is a memory-only review. Save only candidates classified as memory; a reusable workflow belongs in a "
+    "skill review, and transient or no-op candidates get no write.\n\n"
     "Memory has " + _MEMORY_ROUTING_BLOCK +
-    "If something stands out, save it once, in the right store, using the memory tool with the "
-    "matching target. If nothing is worth saving, just say 'Nothing to save.' and stop."
+    "Focus on:\n"
+    "1. Has the user revealed things about themselves — their persona, desires, preferences, or "
+    "personal details worth remembering?\n"
+    "2. Has the user expressed expectations about how you should behave, their work style, or ways "
+    "they want you to operate?\n\n"
+    "For each qualifying memory, save only the directly supported fact using the memory tool. If none qualifies, "
+    "say 'Nothing to save.' and stop."
 )
 
 # Shared shape contract for anything written into a skill. The failure mode this prevents is the
@@ -416,14 +439,14 @@ _DO_NOT_CAPTURE_BLOCK = (
 )
 
 _SKILL_REVIEW_PROMPT = (
-    "Review the conversation above and update the skill library. Be ACTIVE — most sessions produce "
-    "at least one skill update, even if small. A pass that does nothing is a missed learning "
-    "opportunity, not a neutral outcome.\n\n"
+    _DURABLE_LEARNING_CONTRACT +
+    "This is a skill-only review. Update the skill library only for candidates classified as skill; memory, "
+    "transient, and no-op candidates get no skill write.\n\n"
     "Target shape of the library: CLASS-LEVEL skills, each with a SKILL.md of always-on rules and a "
     "small `references/` set of topical depth. Not a flat list of narrow one-session skills, and "
     "not an umbrella hoarding a references/ file per session. This shapes HOW you update, not "
     "WHETHER you update.\n\n" + _LESSON_LAYER_BLOCK +
-    "Signals to look for (any one of these warrants action):\n"
+    "Signals to evaluate as possible skill evidence (classify them before acting):\n"
     "  • User corrected your style, tone, format, legibility, or verbosity. Frustration signals "
     "like 'stop doing X', 'this is too verbose', 'don't format like this', 'why are you "
     "explaining', 'just give me the answer', 'you always do Y and I hate it', or an explicit "
@@ -435,8 +458,7 @@ _SKILL_REVIEW_PROMPT = (
     "that a future session would benefit from. Capture it.\n"
     "  • A skill that got loaded or consulted this session turned out to be wrong, missing a step, "
     "or outdated. Patch it NOW.\n\n"
-    "Preference order — prefer the earliest action that fits, but do pick one when a signal above "
-    "fired:\n"
+    "For a candidate that qualifies as skill learning, prefer the earliest action that fits:\n"
     "  1. UPDATE A CURRENTLY-LOADED SKILL. Look back through the conversation for skills the user "
     "loaded via /skill-name or you read via skill_view. If any of them covers the territory of the "
     "new learning, PATCH that one first (re-load it with skill_view during this review — see "
@@ -496,21 +518,20 @@ _SKILL_REVIEW_PROMPT = (
     "If the only skills that need updating are protected, say\n"
     "'Nothing to save.' and stop.\n\n"
     "Do NOT capture" + _DO_NOT_CAPTURE_BLOCK +
-    "'Nothing to save.' is a real option but should NOT be the default. If the session ran "
-    "smoothly with no corrections and produced no new technique, just say 'Nothing to save.' and "
-    "stop. Otherwise, act."
+    "If no candidate qualifies as durable skill learning, make no write, say 'Nothing to save.', and stop."
 )
 
 _COMBINED_REVIEW_PROMPT = (
-    "Review the conversation above and update two things:\n\n"
+    _DURABLE_LEARNING_CONTRACT +
+    "This review may update two things, but only after classification:\n\n"
     "**Memory**: " + _MEMORY_ROUTING_BLOCK +
-    "**Skills**: how to do this class of task. Be ACTIVE — most sessions produce at least one "
-    "skill update. A pass that does nothing is a missed learning opportunity, not a neutral "
-    "outcome.\n\n"
+    "Save only directly evidenced candidates classified as memory, once and in the right store.\n\n"
+    "**Skills**: how to do this class of task. Save only verified, reusable procedures or rules; do not turn memory, "
+    "transient, or no-op candidates into skill writes.\n\n"
     "Target shape of the skill library: CLASS-LEVEL skills with a SKILL.md of always-on rules and a "
     "small `references/` set of topical depth — not narrow one-session skills, and not an umbrella "
     "hoarding a references/ file per session.\n\n" + _LESSON_LAYER_BLOCK +
-    "Signals that warrant a skill update (any one is enough):\n"
+    "Signals to evaluate as possible skill evidence (classify them before acting):\n"
     "  • User corrected your style, tone, format, legibility, verbosity, or approach. Frustration "
     "is a FIRST-CLASS skill signal, not just a memory signal. 'stop doing X', 'don't format like "
     "this', 'I hate when you Y' — embed the lesson in the skill that governs that task so the next "
@@ -518,7 +539,7 @@ _COMBINED_REVIEW_PROMPT = (
     "  • Non-trivial technique, fix, workaround, or debugging path emerged.\n"
     "  • A skill that was loaded or consulted turned out wrong, missing, or outdated — patch it "
     "now.\n\n"
-    "Preference order for skills — pick the earliest that fits:\n"
+    "For a candidate that qualifies as skill learning, pick the earliest action that fits:\n"
     "  1. UPDATE A CURRENTLY-LOADED SKILL. Check what skills were loaded via /skill-name or "
     "skill_view in the conversation. If one of them covers the learning, PATCH it first (re-load "
     "it with skill_view during this review — see Read-before-write below). It was in play; it's "
@@ -563,8 +584,8 @@ _COMBINED_REVIEW_PROMPT = (
     "If the only skills that need updating are protected, say\n"
     "'Nothing to save.' and stop.\n\n"
     "Do NOT capture as skills" + _DO_NOT_CAPTURE_BLOCK +
-    "Act on whichever of the two dimensions has real signal. If genuinely nothing stands out on "
-    "either, say 'Nothing to save.' and stop — but don't reach for that conclusion as a default."
+    "Act only on dimensions with durable evidence. If neither has a qualifying candidate, make no write, say "
+    "'Nothing to save.', and stop."
 )
 
 

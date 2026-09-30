@@ -2574,6 +2574,9 @@ export type { ModelOptionProvider, ModelOptionsResult };
 
 export interface AuxiliaryTaskAssignment {
   task: string;
+  /** Registry metadata is present on current backends and absent on older ones. */
+  display_name?: string;
+  description?: string;
   provider: string;
   model: string;
   base_url: string;

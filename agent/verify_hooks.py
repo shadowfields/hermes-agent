@@ -18,11 +18,12 @@ DEFAULT_MAX_VERIFY_NUDGES = 3
 # Appended to the verification-stop nudge when code lacks fresh evidence. Mirrors
 # the user-facing "clean your work" workflow without adding its own model turn.
 CODING_VERIFY_GUIDANCE = (
-    "[Coding] Before you run tests/linters or call this done: if this is "
-    "creative UI/visual work, hold off on tests and linters until the user says "
-    "they like the result or you're about to commit. And before every commit, "
-    "clean your work: keep it KISS/DRY, match the surrounding code style, and be "
-    "elitist, shorthand, clever, concise, efficient, and elegant."
+    "[Coding] Before verification or calling the work done: simplify the changed "
+    "code, remove duplicated logic and dead or experimental branches, match the "
+    "surrounding code style, then run the smallest relevant checks. For creative "
+    "UI or visual work, defer tests and linters until the user accepts the design "
+    "or you are about to commit. Before every commit, inspect the diff for scope "
+    "creep and repeat the relevant checks."
 )
 
 

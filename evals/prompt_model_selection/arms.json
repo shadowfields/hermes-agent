@@ -1,0 +1,154 @@
+{
+  "schema_version": 3,
+  "study_id": "hermes-prompt-model-selection-2026-09-29-v1",
+  "default_min_repetitions": 3,
+  "snapshot_date": "2026-09-29",
+  "arms": {
+    "current": {
+      "description": "Observed default Hermes routing before this change; specialized profiles may differ.",
+      "source_commit": "git-commit-sha1:4546cd40ecb764dd265c38923b227b572b355d32",
+      "routes": {
+        "curator": {
+          "provider": "anthropic",
+          "model": "claude-opus-5",
+          "reasoning_effort": "high",
+          "prompt_sources": {
+            "agent/curator.py": "git-blob-sha1:5a8a69c94c97c1ab79ade7491c052dfbccf20f60"
+          }
+        },
+        "background_review": {
+          "provider": "anthropic",
+          "model": "claude-opus-5",
+          "reasoning_effort": "high",
+          "prompt_sources": {
+            "agent/background_review.py": "git-blob-sha1:4045e33a502b69f44cb24f442f8fdc2a0d3be9ad"
+          }
+        },
+        "delegation": {
+          "provider": "anthropic",
+          "model": "claude-opus-5",
+          "reasoning_effort": "high",
+          "max_iterations": 250,
+          "prompt_sources": {
+            "tools/delegate_tool.py": "git-blob-sha1:f091afdeb0a51213e973251f5c7704549b95a653",
+            "tools/delegate_tool_progress.py": "git-blob-sha1:f5903a1ed96a26276e8d9943aef422787ea9051c",
+            "tools/delegation_output_schema.py": "git-blob-sha1:1f1233289e43d4598a99ccba7d79234bc026b569"
+          }
+        },
+        "moa_aggregation": {
+          "provider": "anthropic",
+          "model": "claude-opus-5",
+          "reasoning_effort": "high",
+          "prompt_sources": {
+            "agent/moa_loop.py": "git-blob-sha1:141c5e4f4812160a452aee28531fa3a1f82770d0"
+          }
+        },
+        "smart_approval": {
+          "provider": "anthropic",
+          "model": "claude-opus-5",
+          "reasoning_effort": "high",
+          "prompt_sources": {
+            "tools/approval_smart.py": "git-blob-sha1:61a27fb4a01c33dccfe48dac6dae33735c3334ac"
+          }
+        },
+        "goal_judge": {
+          "provider": "anthropic",
+          "model": "claude-opus-5",
+          "reasoning_effort": "high",
+          "prompt_sources": {
+            "hermes_cli/goals.py": "git-blob-sha1:47aa40f165eb4dbd2d67bbcda3e2729f489d7ee9"
+          }
+        },
+        "teams_summary": {
+          "provider": "anthropic",
+          "model": "claude-opus-5",
+          "reasoning_effort": "high",
+          "prompt_sources": {
+            "plugins/teams_pipeline/pipeline.py": "git-blob-sha1:0b370a178060f3c66f52eb2e300b3ca503a8c1f3"
+          }
+        },
+        "kanban_decomposer": {
+          "provider": "anthropic",
+          "model": "claude-opus-5",
+          "reasoning_effort": "high",
+          "prompt_sources": {
+            "hermes_cli/kanban_decompose.py": "git-blob-sha1:47d280089ab00a9a9bd0d1325983226181e40a83"
+          }
+        }
+      }
+    },
+    "proposed": {
+      "description": "Candidate quality-first routing; validate before applying broadly.",
+      "source_commit": "git-commit-sha1:dc476e7734d86a2ae6e5664403da3fa303921791",
+      "routes": {
+        "curator": {
+          "provider": "anthropic",
+          "model": "claude-sonnet-5",
+          "reasoning_effort": "medium",
+          "prompt_sources": {
+            "agent/curator.py": "git-blob-sha1:b3c385d5ad42f13c9211c563a6e6da6b8322b85f"
+          }
+        },
+        "background_review": {
+          "provider": "anthropic",
+          "model": "claude-sonnet-5",
+          "reasoning_effort": "medium",
+          "prompt_sources": {
+            "agent/background_review.py": "git-blob-sha1:5b3e2dc2846bba6bf3732d6f3a755fa2b44e3f4f"
+          }
+        },
+        "delegation": {
+          "provider": "anthropic",
+          "model": "claude-sonnet-5",
+          "reasoning_effort": "medium",
+          "max_iterations": 80,
+          "prompt_sources": {
+            "tools/delegate_tool.py": "git-blob-sha1:cd1030e4e469869815cd16ce7f2398dbbe4079cc",
+            "tools/delegate_tool_progress.py": "git-blob-sha1:6c4c71bf53b3b2b064c95886a3b6a56e4aed462f",
+            "tools/delegation_output_schema.py": "git-blob-sha1:bcb25be4d788109d8d0a4d72e0bfcd566f6b915d"
+          }
+        },
+        "moa_aggregation": {
+          "provider": "anthropic",
+          "model": "claude-opus-5",
+          "reasoning_effort": "high",
+          "prompt_sources": {
+            "agent/moa_loop.py": "git-blob-sha1:7e4b796bebf78bf85810bf0006745a86e712f340"
+          }
+        },
+        "smart_approval": {
+          "provider": "anthropic",
+          "model": "claude-sonnet-5",
+          "reasoning_effort": "medium",
+          "prompt_sources": {
+            "tools/approval_smart.py": "git-blob-sha1:f27d06f047fd57bc3d2dc723338a5f600cfe516e"
+          }
+        },
+        "goal_judge": {
+          "provider": "anthropic",
+          "model": "claude-sonnet-5",
+          "reasoning_effort": "medium",
+          "prompt_sources": {
+            "hermes_cli/goals.py": "git-blob-sha1:3621a53eff6dd1687d4db75b17ad05f4b451f94f"
+          }
+        },
+        "teams_summary": {
+          "provider": "anthropic",
+          "model": "claude-sonnet-5",
+          "reasoning_effort": "medium",
+          "prompt_sources": {
+            "plugins/teams_pipeline/pipeline.py": "git-blob-sha1:7a24d764d1d1ed9a566b8588862360b4ce2002c9"
+          }
+        },
+        "kanban_decomposer": {
+          "provider": "anthropic",
+          "model": "claude-sonnet-5",
+          "reasoning_effort": "medium",
+          "prompt_sources": {
+            "hermes_cli/kanban_decompose.py": "git-blob-sha1:a0b70e4f98b4f607b405149c8cc2afc73afa6c5c"
+          }
+        }
+      }
+    }
+  }
+}

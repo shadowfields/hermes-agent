@@ -96,29 +96,37 @@ def collect_parent_loaded_skills(parent_agent, messages: List[Dict[str, Any]], l
     return names[:limit]
 
 
-def build_review_task(snapshot: List[Dict[str, str]], user_prompt: str = "", loaded_skills: Optional[List[str]] = None) -> tuple:
-    """Compose a viewer-friendly goal and the complete reviewer briefing."""
-    focus = " ".join(user_prompt.split())
-    goal = f"Review: {focus}" if focus else "Review recent work"
-    if len(goal) > 80:
-        goal = goal[:79].rstrip() + "…"
-    # The goal is also the live worker label; keep the full instructions in context.
-    lines = [
-        _REVIEW_GOAL,
-        "",
-        "You were spawned by the /review command. The following is an excerpt of the most recent conversation "
-        "between the user and their primary agent. It is your starting evidence — the work to "
-        "review is referenced in it.",
-        "",
-        "--- Recent conversation (oldest first) ---",
+def build_review_task(
+    snapshot: List[Dict[str, str]],
+    user_prompt: str = "",
+    loaded_skills: Optional[List[str]] = None,
+) -> tuple[str, str, str]:
+    """Return the authoritative goal, fallible evidence, and trusted constraints.
+
+    ``delegate_task`` sends ``goal`` once as the child's first user turn.  The
+    system prompt separately labels ``constraints`` as trusted instructions and
+    ``context`` as fallible data.  Keep that authority split here: a concise UI
+    label must never replace or truncate the reviewer's actual task.
+    """
+    goal = _REVIEW_GOAL
+    context_lines = [
+        "--- Recent conversation evidence (oldest first) ---",
     ]
     for message in snapshot:
-        lines += [f"[{'USER' if message['role'] == 'user' else 'PRIMARY AGENT'}]", message["text"], ""]
-    lines.append("--- End of conversation excerpt ---")
+        context_lines += [
+            f"[{'USER' if message['role'] == 'user' else 'PRIMARY AGENT'}]",
+            message["text"],
+            "",
+        ]
+    context_lines.append("--- End of conversation evidence ---")
+
+    constraint_lines = [
+        "You were spawned by the /review command. The review is delivered back into the spawning conversation, "
+        "addressed to the primary agent and its user. Be direct and specific; do not soften findings."
+    ]
     if loaded_skills:
         skill_list = ", ".join(loaded_skills)
-        lines += [
-            "",
+        constraint_lines += [
             "The primary agent was operating under these loaded skills: "
             f"{skill_list}. Before reviewing, load each with "
             "skill_view(name=...) and treat their conventions, invariants, "
@@ -126,14 +134,11 @@ def build_review_task(snapshot: List[Dict[str, str]], user_prompt: str = "", loa
             "was produced under them and must be judged against them.",
         ]
     if user_prompt.strip():
-        lines += ["", "Additional review instructions from the user:", user_prompt.strip()]
-    lines += [
-        "",
-        "Your review is delivered back into that conversation, addressed to "
-        "the primary agent and its user. Be direct and specific; do not "
-        "soften findings.",
-    ]
-    return goal, "\n".join(lines)
+        constraint_lines += [
+            "Additional review instructions from the user (binding within this review):",
+            user_prompt.strip(),
+        ]
+    return goal, "\n".join(context_lines), "\n\n".join(constraint_lines)
 
 
 def _load_review_credentials_cfg() -> Optional[Dict[str, Any]]:
@@ -147,10 +152,21 @@ def _load_review_credentials_cfg() -> Optional[Dict[str, Any]]:
     if not isinstance(review, dict):
         return None
 
-    cfg = {k: str(review.get(k) or "").strip() for k in ("provider", "model", "base_url", "api_key", "api_mode")}
+    cfg = {
+        k: str(review.get(k) or "").strip()
+        for k in ("provider", "model", "base_url", "api_key", "api_mode")
+    }
+    raw_effort = review.get("reasoning_effort")
+    cfg["reasoning_effort"] = False if raw_effort is False else str(raw_effort or "").strip()
     if cfg["provider"].lower() == "auto":
         cfg["provider"] = ""
-    if not (cfg["provider"] or cfg["model"] or cfg["base_url"]):
+    if not (
+        cfg["provider"]
+        or cfg["model"]
+        or cfg["base_url"]
+        or cfg["reasoning_effort"]
+        or cfg["reasoning_effort"] is False
+    ):
         return None
     return cfg
 
@@ -164,11 +180,20 @@ def start_review(parent_agent, messages: List[Dict[str, Any]], user_prompt: str 
     snapshot = snapshot_recent_messages(messages)
     if not snapshot:
         raise ValueError("Nothing to review yet — the conversation is empty.")
-    goal, context = build_review_task(snapshot, user_prompt, collect_parent_loaded_skills(parent_agent, messages))
+    goal, context, constraints = build_review_task(
+        snapshot,
+        user_prompt,
+        collect_parent_loaded_skills(parent_agent, messages),
+    )
     credentials_cfg = _load_review_credentials_cfg()
 
     from tools.delegate_tool import delegate_task
-    raw = delegate_task(goal=goal, context=context, background=True, parent_agent=parent_agent, credentials_cfg=credentials_cfg)
+    raw = delegate_task(
+        tasks=[{"goal": goal, "context": context, "constraints": constraints}],
+        background=True,
+        parent_agent=parent_agent,
+        credentials_cfg=credentials_cfg,
+    )
     try:
         result = json.loads(raw)
     except Exception:

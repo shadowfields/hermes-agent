@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException
 
 from hermes_cli.web_deps import LateState, late
 from hermes_cli.web_server_config import (
-    _AUX_TASK_SLOTS, _UNSET, _apply_model_assignment_sync, _dashboard_code_skew_guard,
+    _UNSET, _all_aux_task_entries, _apply_model_assignment_sync, _dashboard_code_skew_guard,
     _prepare_main_assignment,
 )
 from agent.model_metadata import is_local_endpoint
@@ -222,18 +222,25 @@ def get_auxiliary_models(profile: Optional[str] = None):
     without it the Models page would show the dashboard profile's pins while
     /api/model/set wrote the selected profile's."""
     with http_failure("GET /api/model/auxiliary failed", 500, detail="Failed to read auxiliary config"):
-        cfg = _load_config_scoped(profile)
+        with _profile_scope(profile):
+            cfg = load_config()
+            task_entries = _all_aux_task_entries()
         aux_cfg = cfg.get("auxiliary", {})
         if not isinstance(aux_cfg, dict):
             aux_cfg = {}
 
         tasks = []
-        for slot in _AUX_TASK_SLOTS:
+        for entry in task_entries:
+            slot = entry["key"]
             slot_cfg = aux_cfg.get(slot, {}) if isinstance(aux_cfg.get(slot), dict) else {}
+            defaults = entry.get("defaults") if isinstance(entry.get("defaults"), dict) else {}
+            slot_cfg = {**defaults, **slot_cfg}
             base_url = str(slot_cfg.get("base_url", "") or "")
             tasks.append({
                 "task": slot, "provider": str(slot_cfg.get("provider", "auto") or "auto"),
                 "model": str(slot_cfg.get("model", "") or ""), "base_url": base_url,
+                "display_name": str(entry.get("display_name") or slot),
+                "description": str(entry.get("description") or ""),
                 "reasoning_effort": str(slot_cfg.get("reasoning_effort") or "") or None,
                 # Lets the UI tell a free local/LAN pin from a forgotten paid-provider pin.
                 "local_endpoint": is_local_endpoint(base_url),

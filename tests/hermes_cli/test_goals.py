@@ -96,6 +96,30 @@ class TestJudgeGoal:
         assert verdict == "done"
         assert reason == "achieved"
 
+    def test_plain_goal_prompt_requires_evidence_not_self_attestation(self):
+        """Bare goals need the same evidence floor as structured contracts."""
+        from hermes_cli import goals
+
+        captured = {}
+
+        def _fake_call_llm(**kwargs):
+            captured.update(kwargs)
+            return MagicMock(
+                choices=[MagicMock(message=MagicMock(
+                    content='{"verdict": "continue", "reason": "no evidence"}'
+                ))]
+            )
+
+        with patch("agent.auxiliary_client.call_llm", side_effect=_fake_call_llm):
+            goals.judge_goal("repair the parser", "Done. Everything is complete.")
+
+        messages = captured["messages"]
+        prompt = "\n".join(message["content"] for message in messages).lower()
+        assert "concrete evidence" in prompt
+        assert "completion claim" in prompt
+        assert "insufficient" in prompt
+        assert "command result" in prompt or "test output" in prompt
+
 
 
 # ──────────────────────────────────────────────────────────────────────

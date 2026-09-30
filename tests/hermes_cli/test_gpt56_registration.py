@@ -39,10 +39,15 @@ class TestGpt56SortInvariants:
 class TestGpt56PricingRoute:
     def test_official_pricing_reachable_from_openai(self):
         route = resolve_billing_route("gpt-5.6-sol", provider="openai")
+        picker_route = resolve_billing_route("gpt-5.6-sol", provider="openai-api")
         entry = _lookup_official_docs_pricing(route)
         assert entry is not None
+        assert picker_route.provider == route.provider
+        assert _lookup_official_docs_pricing(picker_route) is entry
         assert entry.input_cost_per_million is not None
-
+        assert entry.source == "official_docs_snapshot"
+        assert entry.source_url
+        assert entry.pricing_version
 
     def test_cache_write_is_1_25x_input_for_56_series(self):
         for slug in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):

@@ -101,14 +101,15 @@ function isProviderReady(p?: ModelOptionProvider): boolean {
   return !!p && (p.authenticated !== false || (p.models?.length ?? 0) > 0)
 }
 
-// Mirrors `_AUX_TASK_SLOTS` in hermes_cli/web_server.py. Friendly labels and
-// hints make the assignments readable; raw task keys (vision, mcp, …) are
-// opaque to most users.
+// Backward-compatible labels for built-ins. Plugin task metadata comes from
+// GET /api/model/auxiliary and is appended at runtime.
 interface AuxTaskMeta {
   key: string
+  label: string
+  hint: string
 }
 
-const AUX_TASKS: readonly AuxTaskMeta[] = [
+const BUILTIN_AUX_TASK_KEYS = [
   { key: 'vision' },
   { key: 'compression' },
   { key: 'skills_hub' },
@@ -122,7 +123,7 @@ const AUX_TASKS: readonly AuxTaskMeta[] = [
   { key: 'kanban_decomposer' },
   { key: 'profile_describer' },
   { key: 'curator' }
-]
+] as const
 
 const NO_PROVIDERS: readonly ModelOptionProvider[] = [{ name: '—', slug: '', models: [] }]
 
@@ -264,6 +265,33 @@ export function ModelSettings({ onMainModelChanged, scopeProfile, subpage }: Mod
   const [applying, setApplying] = useState(false)
   const [editingAuxTask, setEditingAuxTask] = useState<null | string>(null)
 
+  const auxiliaryTasks = useMemo<AuxTaskMeta[]>(() => {
+    const builtins: AuxTaskMeta[] = BUILTIN_AUX_TASK_KEYS.map(({ key }) => {
+      const copy = m.tasks[key]
+
+      return { key, label: copy?.label ?? key, hint: copy?.hint ?? key }
+    })
+
+    const seen = new Set(builtins.map(task => task.key))
+
+    for (const assignment of auxiliary?.tasks ?? []) {
+      if (!assignment.task || seen.has(assignment.task)) {
+        continue
+      }
+
+      seen.add(assignment.task)
+      const copy = m.tasks[assignment.task]
+
+      builtins.push({
+        key: assignment.task,
+        label: copy?.label ?? assignment.display_name ?? assignment.task,
+        hint: copy?.hint ?? assignment.description ?? assignment.task
+      })
+    }
+
+    return builtins
+  }, [auxiliary, m.tasks])
+
   const [auxDraft, setAuxDraft] = useState<{ model: string; provider: string; reasoningEffort: string }>({
     model: '',
     provider: '',
@@ -283,7 +311,7 @@ export function ModelSettings({ onMainModelChanged, scopeProfile, subpage }: Mod
   useDeepLinkHighlight({
     elementId: task => `aux-task-${task}`,
     param: 'aux',
-    ready: task => showAuxiliary && !loading && AUX_TASKS.some(meta => meta.key === task)
+    ready: task => showAuxiliary && !loading && auxiliaryTasks.some(meta => meta.key === task)
   })
 
   // Every profile-scoped async here captures this and bails before writing back,
@@ -591,7 +619,10 @@ export function ModelSettings({ onMainModelChanged, scopeProfile, subpage }: Mod
     [m.loadFailed, scopeProfile, setCaughtError]
   )
 
-  const auxiliaryTaskLabel = useCallback((key: string) => m.tasks[key]?.label ?? key, [m.tasks])
+  const auxiliaryTaskLabel = useCallback(
+    (key: string) => auxiliaryTasks.find(task => task.key === key)?.label ?? key,
+    [auxiliaryTasks]
+  )
 
   const persistentStaleAux = useMemo<StaleAuxAssignment[]>(
     () => staleAuxAssignments(auxiliary?.tasks ?? [], mainModel?.provider ?? ''),
@@ -1101,8 +1132,7 @@ export function ModelSettings({ onMainModelChanged, scopeProfile, subpage }: Mod
             </div>
           )}
           <div className="grid gap-1">
-            {AUX_TASKS.map(meta => {
-              const copy = m.tasks[meta.key] ?? { label: meta.key, hint: meta.key }
+            {auxiliaryTasks.map(meta => {
               const current = auxiliary?.tasks.find(entry => entry.task === meta.key)
               const isAuto = !current || !current.provider || current.provider === 'auto'
               const isEditing = editingAuxTask === meta.key
@@ -1141,7 +1171,7 @@ export function ModelSettings({ onMainModelChanged, scopeProfile, subpage }: Mod
                               value={findCatalogProvider(providers, auxDraft.provider)?.slug ?? auxDraft.provider}
                             >
                               <SelectTrigger
-                                aria-label={`${copy.label} provider`}
+                                aria-label={`${meta.label} provider`}
                                 className={cn('min-w-32', CONTROL_TEXT)}
                               >
                                 <SelectValue placeholder={m.provider} />
@@ -1155,7 +1185,7 @@ export function ModelSettings({ onMainModelChanged, scopeProfile, subpage }: Mod
                               </SelectContent>
                             </Select>
                             <ModelSelect
-                              aria-label={`${copy.label} model`}
+                              aria-label={`${meta.label} model`}
                               className="min-w-48"
                               models={auxDraftProviderModels}
                               onValueChange={value => setAuxDraft(prev => ({ ...prev, model: value }))}
@@ -1171,7 +1201,7 @@ export function ModelSettings({ onMainModelChanged, scopeProfile, subpage }: Mod
                               value={auxDraft.reasoningEffort}
                             >
                               <SelectTrigger
-                                aria-label={`${copy.label} reasoning effort`}
+                                aria-label={`${meta.label} reasoning effort`}
                                 className={cn('min-w-32', CONTROL_TEXT)}
                               >
                                 <SelectValue />
@@ -1221,8 +1251,8 @@ export function ModelSettings({ onMainModelChanged, scopeProfile, subpage }: Mod
                     }
                     title={
                       <span className="flex items-baseline gap-2">
-                        {copy.label}
-                        <Pill>{copy.hint}</Pill>
+                        {meta.label}
+                        <Pill>{meta.hint}</Pill>
                       </span>
                     }
                   />
