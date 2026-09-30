@@ -60,11 +60,6 @@ def append_output_contract(constraints: Optional[str], schema: Dict[str, Any]) -
     return f"{base}\n\n{block}" if base else block
 
 
-def has_output_contract(constraints: Optional[str]) -> bool:
-    """Whether trusted constraints contain this module's schema contract."""
-    return OUTPUT_CONTRACT_HEADER in str(constraints or "")
-
-
 def extract_json_candidate(text: str) -> str:
     """Strip markdown fences and prose around the outermost ``{...}``/``[...]``."""
     raw = (text or "").strip()
@@ -121,12 +116,3 @@ def build_retry_message(errors: List[str]) -> str:
             "validator. Validation errors:\n" f"{error_block}\n\n"
             "Reply with ONLY the corrected JSON object matching the OUTPUT "
             "CONTRACT schema from your delegated constraints. No prose, no explanations.")
-
-
-# ---- BEGIN PLUGIN-COMPAT (revert-scheduled; see COMPAT_MANIFEST.md) ----
-# Names external plugins imported from this module before the Sep 2026 decomposition.
-# Internal code MUST NOT use these (scripts/check_compat_pointers.py fails CI if it does).
-# The whole block is removed by reverting the commit that added it.
-
-MAX_SCHEMA_RETRIES = 1
-# ---- END PLUGIN-COMPAT ----

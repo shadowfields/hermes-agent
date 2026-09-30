@@ -163,6 +163,91 @@ def test_success_for_input_edited_during_model_call_is_rejected_without_retry_de
     assert kd.list_triage_ids(auto_retry_due_only=True, now=900) == [task_id]
 
 
+@pytest.mark.parametrize("fanout", [False, True])
+def test_success_for_task_reassigned_during_model_call_is_rejected_without_retry_debt(
+    kanban_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fanout: bool,
+) -> None:
+    initial_assignee = "original-owner" if fanout else None
+    with kbc.connect_closing() as conn:
+        task_id = kb.create_task(
+            conn,
+            title="route this work",
+            body="original routing input",
+            assignee=initial_assignee,
+            triage=True,
+        )
+
+    parsed = (
+        {
+            "fanout": True,
+            "rationale": "split the work",
+            "tasks": [{
+                "title": "stale generated child",
+                "body": _complete_decomposition_body(),
+                "assignee": None,
+                "parents": [],
+            }],
+        }
+        if fanout
+        else {
+            "fanout": False,
+            "rationale": "one unit of work",
+            "title": "stale generated title",
+            "body": _complete_decomposition_body(),
+            "assignee": "worker",
+        }
+    )
+
+    def reassign_then_return_success(_verb: str, reassigned_task_id: str, **_kwargs):
+        assert reassigned_task_id == task_id
+        with kbc.connect_closing() as conn:
+            assert kb.assign_task(conn, task_id, "operator-owner")
+        return json.dumps(parsed), ""
+
+    monkeypatch.setattr(
+        kd,
+        "_load_routing",
+        lambda **_kwargs: kd._Routing(
+            "original-owner",
+            "worker",
+            False,
+            [],
+            {"original-owner", "operator-owner", "worker"},
+        ),
+    )
+    monkeypatch.setattr(kd, "_call_aux", reassign_then_return_success)
+    real_decompose_task = kd.decompose_task
+    outcomes = []
+
+    def capture_outcome(*args, **kwargs):
+        outcome = real_decompose_task(*args, **kwargs)
+        outcomes.append(outcome)
+        return outcome
+
+    monkeypatch.setattr(kd, "decompose_task", capture_outcome)
+    assert _dispatcher(monkeypatch).auto_decompose_tick(1, now=950) == 0
+
+    assert len(outcomes) == 1
+    assert outcomes[0].ok is False
+    assert outcomes[0].auto_retry_skipped is True
+    assert "changed" in outcomes[0].reason
+    with kbc.connect_closing() as conn:
+        task = kb.get_task(conn, task_id)
+        task_ids = [row.id for row in kb.list_tasks(conn, include_archived=True)]
+        event_kinds = [event.kind for event in kb.list_events(conn, task_id)]
+    assert task is not None
+    assert task.status == "triage"
+    assert task.assignee == "operator-owner"
+    assert task_ids == [task_id]
+    assert "assigned" in event_kinds
+    assert "specified" not in event_kinds
+    assert "decomposed" not in event_kinds
+    assert "auto_decompose_failed" not in event_kinds
+    assert kd.list_triage_ids(auto_retry_due_only=True, now=950) == [task_id]
+
+
 def test_cooling_failure_does_not_repeat_or_starve_later_task(
     kanban_home: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -200,6 +285,36 @@ def test_cooling_failure_does_not_repeat_or_starve_later_task(
     assert failure_events[-1].payload["next_attempt_at"] == 1_300
     assert failure_events[-1].payload["parked"] is False
     assert later_task is not None and later_task.status == "ready"
+
+
+def test_failure_cooldown_starts_when_the_model_attempt_finishes(
+    kanban_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with kbc.connect_closing() as conn:
+        task_id = kb.create_task(conn, title="slow invalid model output", triage=True)
+
+    clock_calls = 0
+
+    def advancing_clock() -> int:
+        nonlocal clock_calls
+        clock_calls += 1
+        return 1_000 if clock_calls == 1 else 1_400
+
+    monkeypatch.setattr(kwd.time, "time", advancing_clock)
+    monkeypatch.setattr(kd, "decompose_task", lambda *_args, **_kwargs: _failed(task_id))
+
+    assert _dispatcher(monkeypatch).auto_decompose_tick(1) == 0
+
+    with kbc.connect_closing() as conn:
+        failure_events = [
+            event for event in kb.list_events(conn, task_id)
+            if event.kind == "auto_decompose_failed"
+        ]
+    assert len(failure_events) == 1
+    assert failure_events[0].payload["next_attempt_at"] == 1_700
+    assert kd.list_triage_ids(auto_retry_due_only=True, now=1_699) == []
+    assert kd.list_triage_ids(auto_retry_due_only=True, now=1_700) == [task_id]
 
 
 def test_failure_recorded_after_selection_is_rechecked_before_model_call(

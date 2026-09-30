@@ -50,6 +50,7 @@ logger = logging.getLogger(__name__)
 AUTO_DECOMPOSE_RETRY_COOLDOWN_SECONDS = 300
 _AUTO_DECOMPOSE_FAILURE_KIND = "auto_decompose_failed"
 _AUTO_DECOMPOSE_RESET_KINDS = (
+    "assigned",
     "created",
     "decomposed",
     "edited",
@@ -353,7 +354,7 @@ def _success_input_guard(
     kinds_sql = ", ".join(f"'{kind}'" for kind in guarded_kinds)
     conn.create_function(
         "_auto_decompose_input_digest",
-        2,
+        3,
         _decompose_input_digest,
     )
     conn.execute(
@@ -373,7 +374,7 @@ def _success_input_guard(
          AND (SELECT active FROM {table_name}) = 1
         BEGIN
             SELECT CASE WHEN
-                _auto_decompose_input_digest(OLD.title, OLD.body)
+                _auto_decompose_input_digest(OLD.title, OLD.body, OLD.assignee)
                     != (SELECT input_digest FROM {table_name})
                 OR COALESCE((
                     SELECT MAX(event.id)
@@ -524,7 +525,7 @@ def _load_triage_task_with_token(
     if task.status != "triage":
         return None, f"task is not in triage (status={task.status!r})", None, False
     input_token = (
-        _decompose_input_digest(task.title, task.body),
+        _decompose_input_digest(task.title, task.body, task.assignee),
         int(row["auto_retry_event_id"]),
     )
     if auto_retry_now is not None and row["auto_retry_event_kind"] == _AUTO_DECOMPOSE_FAILURE_KIND:
@@ -643,10 +644,10 @@ def _parse_event_payload(raw_payload: object) -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
-def _decompose_input_digest(title: object, body: object) -> str:
-    """Stable non-plaintext identity for the model-visible task input."""
+def _decompose_input_digest(title: object, body: object, assignee: object) -> str:
+    """Stable non-plaintext identity for model-visible input and routing ownership."""
     serialized = jsonlib.dumps(
-        [title or "", body or ""],
+        [title or "", body or "", assignee],
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -679,14 +680,14 @@ def auto_decompose_retry_due(conn, task_id: str, *, now: Optional[int] = None) -
 def _auto_decompose_input_token(conn, task_id: str) -> Optional[AutoDecomposeInputToken]:
     """Snapshot the input/retry stint that one paid call is evaluating."""
     row = conn.execute(
-        "SELECT status, title, body FROM tasks WHERE id = ?",
+        "SELECT status, title, body, assignee FROM tasks WHERE id = ?",
         (task_id,),
     ).fetchone()
     if row is None or row["status"] != "triage":
         return None
     latest = _latest_auto_decompose_retry_event(conn, task_id)
     return (
-        _decompose_input_digest(row["title"], row["body"]),
+        _decompose_input_digest(row["title"], row["body"], row["assignee"]),
         int(latest["id"]) if latest is not None else 0,
     )
 

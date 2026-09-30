@@ -252,12 +252,10 @@ def _build_child_system_prompt(
         if _ctx_files.strip():
             parts.append(_CONTEXT_FILES_INTRO + _ctx_files.strip())
     parts.append(_EVIDENCE_AND_WORKSPACE_INSTRUCTIONS)
-    # A machine-validated schema already defines the complete final-output
-    # shape.  Adding the normal four-section prose contract here makes the two
-    # instructions mutually impossible to satisfy.  Keep evidence/trust rules,
-    # but let the schema remain the sole output contract.
-    from tools.delegation_output_schema import has_output_contract
-    if not has_output_contract(constraints):
+    # Parent-supplied constraints may bind language, tone, style, or format.
+    # Keep the default shape only when the parent supplied no constraints, so
+    # a schema-less contract such as "return one word" remains satisfiable.
+    if not (constraints and constraints.strip()):
         parts.append(_PROSE_REPORTING_CONTRACT)
     if role == "orchestrator":
         child_note = _LEAF_CHILDREN_NOTE if child_depth + 1 >= max_spawn_depth else _NESTED_CHILDREN_NOTE

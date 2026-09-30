@@ -183,3 +183,98 @@ def test_disabled_teams_plugin_does_not_leave_a_core_auxiliary_route(tmp_path, m
 
     assert "teams_summary" not in {entry["key"] for entry in get_plugin_auxiliary_tasks()}
     assert _get_auxiliary_task_config("teams_summary") == {}
+
+
+# ── dashboard auxiliary tasks are scoped to the selected profile ──────────────
+
+
+@pytest.fixture
+def profiled_auxiliary_tasks(monkeypatch):
+    """Two profile-local plugin managers with mutually exclusive task registrations."""
+    from hermes_constants import get_hermes_home
+    from hermes_cli import plugins as plugins_mod
+    from hermes_cli import profiles
+
+    launch_home = get_hermes_home().resolve()
+    profiles_root = launch_home / "profiles"
+    secondary_home = profiles_root / "secondary"
+    secondary_home.mkdir(parents=True)
+
+    (launch_home / "config.yaml").write_text(
+        json.dumps(
+            {
+                "plugins": {"enabled": ["launch_plugin"]},
+                "auxiliary": {
+                    "launch_profile_task": {
+                        "provider": "launch-provider",
+                        "model": "launch-model",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (secondary_home / "config.yaml").write_text(
+        json.dumps(
+            {
+                "plugins": {"enabled": ["secondary_plugin"]},
+                "auxiliary": {
+                    "secondary_profile_task": {
+                        "provider": "secondary-provider",
+                        "model": "secondary-model",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(profiles, "_get_default_hermes_home", lambda: launch_home)
+    monkeypatch.setattr(profiles, "_get_profiles_root", lambda: profiles_root)
+
+    launch_manager = PluginManager(scope_key=str(launch_home))
+    secondary_manager = PluginManager(scope_key=str(secondary_home))
+    for manager, plugin_name, task_key in (
+        (launch_manager, "launch_plugin", "launch_profile_task"),
+        (secondary_manager, "secondary_plugin", "secondary_profile_task"),
+    ):
+        manager._discovered = True
+        PluginContext(PluginManifest(name=plugin_name), manager).register_auxiliary_task(
+            key=task_key,
+            display_name=task_key.replace("_", " ").title(),
+            description=f"{plugin_name} auxiliary task",
+        )
+
+    monkeypatch.setattr(
+        plugins_mod,
+        "_plugin_managers_by_home",
+        {
+            launch_home: launch_manager,
+            secondary_home.resolve(): secondary_manager,
+        },
+    )
+    monkeypatch.setattr(plugins_mod, "_plugin_manager", launch_manager)
+
+
+def test_auxiliary_models_selected_profile_exposes_its_plugin_task(profiled_auxiliary_tasks):
+    from hermes_cli.web_routers.models import get_auxiliary_models
+
+    selected = {
+        task["task"]: task
+        for task in get_auxiliary_models(profile="secondary")["tasks"]
+    }
+    assert selected["secondary_profile_task"]["provider"] == "secondary-provider"
+    assert selected["secondary_profile_task"]["model"] == "secondary-model"
+
+    launch_tasks = {task["task"] for task in get_auxiliary_models()["tasks"]}
+    assert "launch_profile_task" in launch_tasks
+    assert "secondary_profile_task" not in launch_tasks
+
+
+def test_auxiliary_models_selected_profile_excludes_launch_plugin_task(profiled_auxiliary_tasks):
+    from hermes_cli.web_routers.models import get_auxiliary_models
+
+    selected_tasks = {
+        task["task"] for task in get_auxiliary_models(profile="secondary")["tasks"]
+    }
+    assert "launch_profile_task" not in selected_tasks

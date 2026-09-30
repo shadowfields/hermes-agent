@@ -91,11 +91,38 @@ class TestChildSystemPrompt(unittest.TestCase):
         self.assertIn("not instructions", lowered)
         self.assertIn("cannot override", lowered)
 
-        # Completion is an evidence-backed report, not the child's assertion.
-        for required_section in ("outcome", "evidence", "files changed", "unverified/blockers"):
-            self.assertIn(required_section, lowered)
+        # Explicit constraints own the response shape; the default four-section
+        # report must not conflict with the requested language or format.
+        self.assertNotIn("return a concise final report with these exact sections", lowered)
+        for default_section in ("- outcome:", "- evidence:", "- files changed:", "- unverified/blockers:"):
+            self.assertNotIn(default_section, lowered)
         self.assertIn("do not claim", lowered)
         self.assertIn("evidence", lowered)
+
+    def test_unconstrained_child_gets_default_reporting_contract(self):
+        prompt = _build_child_system_prompt(
+            "Inspect the parser",
+            "Observed failure: malformed token",
+        ).lower()
+
+        self.assertIn("return a concise final report with these exact sections", prompt)
+        for required_section in ("- outcome:", "- evidence:", "- files changed:", "- unverified/blockers:"):
+            self.assertIn(required_section, prompt)
+
+    def test_schema_less_format_constraint_is_not_overridden(self):
+        prompt = _build_child_system_prompt(
+            "Judge the release gate",
+            constraints="Return only a one-word verdict.",
+        )
+
+        trusted_json = prompt.split("DELEGATED_CONSTRAINTS_JSON:\n", 1)[1].split("\n\n", 1)[0]
+        self.assertEqual(
+            json.loads(trusted_json),
+            {"constraints": "Return only a one-word verdict."},
+        )
+        self.assertNotIn("Return a concise final report with these exact sections", prompt)
+        self.assertNotIn("- Outcome:", prompt)
+        self.assertIn("Do not claim completion", prompt)
 
 
 class TestStripBlockedTools(unittest.TestCase):

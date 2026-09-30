@@ -251,7 +251,8 @@ class _KanbanDispatcher:
         except Exception as exc:  # pragma: no cover
             logger.warning("kanban auto-decompose: import failed (%s); skipping", exc)
             return 0
-        tick_now = int(time.time()) if now is None else int(now)
+        fixed_now = None if now is None else int(now)
+        tick_now = int(time.time()) if fixed_now is None else fixed_now
         attempted = 0
         successes = 0
         with _default_profile_secret_scope():
@@ -282,7 +283,8 @@ class _KanbanDispatcher:
                             _decomp,
                             slug,
                             tid,
-                            now=tick_now,
+                            retry_now=tick_now,
+                            failure_now=fixed_now,
                         )
                         if result is None:
                             continue
@@ -295,11 +297,19 @@ class _KanbanDispatcher:
                         os.environ["HERMES_KANBAN_BOARD"] = prev_env
         return successes
 
-    def _decompose_one(self, _decomp: Any, slug: str, tid: str, *, now: int) -> Optional[int]:
+    def _decompose_one(
+        self,
+        _decomp: Any,
+        slug: str,
+        tid: str,
+        *,
+        retry_now: int,
+        failure_now: Optional[int],
+    ) -> Optional[int]:
         """Return 1/0 for a spent attempt, or None when eligibility changed."""
         scope_factory = getattr(_decomp, "auto_decompose_retry_scope", None)
         retry_scope = (
-            scope_factory(now)
+            scope_factory(retry_now)
             if callable(scope_factory)
             else contextlib.nullcontext()
         )
@@ -323,7 +333,7 @@ class _KanbanDispatcher:
                 slug,
                 tid,
                 outcome.reason,
-                now=now,
+                now=failure_now,
                 input_token=getattr(outcome, "input_token", None),
             )
             if parked is None:
@@ -356,7 +366,7 @@ class _KanbanDispatcher:
         tid: str,
         reason: str,
         *,
-        now: int,
+        now: Optional[int],
         input_token: Any,
     ) -> Optional[bool]:
         """Best-effort durable accounting; a bookkeeping error never kills the tick."""

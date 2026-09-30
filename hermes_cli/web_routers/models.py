@@ -222,13 +222,15 @@ def get_auxiliary_models(profile: Optional[str] = None):
     without it the Models page would show the dashboard profile's pins while
     /api/model/set wrote the selected profile's."""
     with http_failure("GET /api/model/auxiliary failed", 500, detail="Failed to read auxiliary config"):
-        cfg = _load_config_scoped(profile)
+        with _profile_scope(profile):
+            cfg = load_config()
+            task_entries = _all_aux_task_entries()
         aux_cfg = cfg.get("auxiliary", {})
         if not isinstance(aux_cfg, dict):
             aux_cfg = {}
 
         tasks = []
-        for entry in _all_aux_task_entries():
+        for entry in task_entries:
             slot = entry["key"]
             slot_cfg = aux_cfg.get(slot, {}) if isinstance(aux_cfg.get(slot), dict) else {}
             defaults = entry.get("defaults") if isinstance(entry.get("defaults"), dict) else {}
