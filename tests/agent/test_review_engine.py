@@ -119,6 +119,7 @@ def test_load_review_credentials_cfg_reads_config(monkeypatch):
         "base_url": "",
         "api_key": "",
         "api_mode": "",
+        "reasoning_effort": "",
     }
 
 def test_load_review_credentials_cfg_auto_means_inherit(monkeypatch):
@@ -184,6 +185,96 @@ def test_delegate_task_credentials_cfg_overrides_delegation_config(monkeypatch):
     parsed = json.loads(out)
     assert parsed["status"] == "dispatched"
     assert seen["cfg"] == override
+
+@pytest.mark.parametrize(
+    ("yaml_effort", "expected_reasoning"),
+    [
+        ("high", {"enabled": True, "effort": "high"}),
+        ("false", {"enabled": False}),
+    ],
+)
+def test_review_reasoning_loads_from_config_and_reaches_child_runtime(
+    monkeypatch, tmp_path, yaml_effort, expected_reasoning,
+):
+    """The real config loader must preserve both an effort and YAML false.
+
+    Child execution is stubbed, but the route travels through ``start_review``
+    and ``delegate_task`` before the production runtime resolver consumes it.
+    """
+    import tools.delegate_tool as dt
+
+    hermes_home = tmp_path / f"review-{yaml_effort}"
+    hermes_home.mkdir()
+    (hermes_home / "config.yaml").write_text(
+        "auxiliary:\n"
+        "  review:\n"
+        "    provider: auto\n"
+        "    model: ''\n"
+        f"    reasoning_effort: {yaml_effort}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+
+    parent = _fake_parent()
+    parent.model = "parent-model"
+    parent.provider = "openai-api"
+    parent.base_url = "https://api.openai.com/v1"
+    parent.api_key = "test-key"
+    parent.api_mode = "responses"
+    parent.reasoning_config = {"enabled": True, "effort": "low"}
+    parent.request_overrides = {}
+    parent.capabilities = {}
+    parent._client_kwargs = {"base_url": parent.base_url}
+    parent.client = None
+    parent.acp_command = None
+    parent.acp_args = []
+    parent._fallback_chain = None
+
+    creds = {
+        "model": None, "provider": None, "base_url": None,
+        "api_key": None, "api_mode": None, "request_overrides": None,
+        "command": None, "args": None,
+    }
+    captured = {}
+    fake_child = MagicMock()
+    fake_child._delegate_role = "leaf"
+
+    def fake_build(**kwargs):
+        captured["routing_cfg"] = kwargs["routing_cfg"]
+        runtime = dt._resolve_child_runtime(
+            kwargs["parent_agent"],
+            dt._load_config(),
+            kwargs["parent_agent"].api_key,
+            model=kwargs["model"],
+            override_provider=kwargs["override_provider"],
+            override_base_url=kwargs["override_base_url"],
+            override_api_key=kwargs["override_api_key"],
+            override_api_mode=kwargs["override_api_mode"],
+            override_acp_command=kwargs["override_acp_command"],
+            override_acp_args=kwargs["override_acp_args"],
+            routing_cfg=kwargs["routing_cfg"],
+        )
+        captured["reasoning_config"] = runtime["reasoning_config"]
+        return fake_child
+
+    monkeypatch.setattr(dt, "_resolve_delegation_credentials", lambda *a, **k: creds)
+    monkeypatch.setattr(dt, "_build_child_agent", fake_build)
+    monkeypatch.setattr(
+        dt, "_run_single_child",
+        lambda *a, **k: {
+            "task_index": 0, "status": "completed", "summary": "ok",
+            "api_calls": 1, "duration_seconds": 0.1, "model": "parent-model",
+            "exit_reason": "completed",
+        },
+    )
+
+    result = start_review(parent, [{"role": "user", "content": "review this"}])
+
+    assert result["status"] == "dispatched"
+    assert captured["routing_cfg"]["reasoning_effort"] == (
+        False if yaml_effort == "false" else yaml_effort
+    )
+    assert captured["reasoning_config"] == expected_reasoning
 
 # ---------------------------------------------------------------------------
 # start_review end-to-end through the async delegation rail
@@ -394,6 +485,10 @@ def test_review_registered_in_every_aux_surface():
 
     assert "review" in DEFAULT_CONFIG["auxiliary"], \
         "review missing from DEFAULT_CONFIG['auxiliary']"
+    slot = DEFAULT_CONFIG["auxiliary"]["review"]
+    assert slot["provider"] == "auto"
+    assert slot["model"] == ""
+    assert slot["reasoning_effort"] == ""
 
     aux_keys = {k for k, _name, _desc in _AUX_TASKS}
     assert "review" in aux_keys, "review missing from _AUX_TASKS (CLI picker)"

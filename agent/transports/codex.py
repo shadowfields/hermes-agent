@@ -11,7 +11,7 @@ import re
 from typing import Any, Callable, Optional
 
 from agent.reasoning_effort import (
-    CODEX_ASTRA_EFFORTS, CODEX_LEGACY_EFFORTS,
+    CODEX_LEGACY_EFFORTS,
     XAI_GROK46_EFFORTS, XAI_LEGACY_EFFORTS, clamp_effort, is_astra_model,
     # Same declared vocabulary + shared clamp as the main Codex transport (agent.reasoning_effort):
     # per-model — "max" availability varies; "minimal"/"ultra" clamp to a listed level.
@@ -272,8 +272,9 @@ def _alias_wire_tools(
     return response_tools, wire_aliases
 
 
-# Models already warned that an explicit disable has no wire form on their route (one warning per process).
-_UNPROJECTABLE_DISABLE_WARNED: set[str] = set()
+# Model/outcome pairs already warned that an explicit disable has no verbatim wire form on their route.
+# The outcome is part of the key because one model may be omitted on a relay but clamped on OpenAI's API.
+_UNPROJECTABLE_DISABLE_WARNED: set[tuple[str, str]] = set()
 # request_overrides is static config: warn about a dropped prompt_cache_options once, not every turn.
 _PROMPT_CACHE_OPTIONS_DROP_WARNED = False
 
@@ -319,9 +320,20 @@ def _resolve_reasoning(model: str, params: dict[str, Any]) -> tuple[Any, bool]:
             return None, False
     if not reasoning_enabled:
         has_none = any(str(level).strip().lower() == "none" for level in supported)
-        if not has_none and model not in _UNPROJECTABLE_DISABLE_WARNED:
-            # #75227: report the unsupported configuration instead of silently falling back.
-            _UNPROJECTABLE_DISABLE_WARNED.add(model)
+        wire_model = (params.get("request_overrides") or {}).get("model", model)
+        projected_by_gpt6_sanitizer = (
+            not params.get("is_xai_responses", False)
+            and _is_official_openai_responses_route(wire_model, params.get("base_url"))
+        )
+        warning_key = (str(model), "omitted")
+        if (
+            not has_none
+            and not projected_by_gpt6_sanitizer
+            and warning_key not in _UNPROJECTABLE_DISABLE_WARNED
+        ):
+            # #75227: generic routes omit an unsupported disable. Official GPT-6 routes defer their
+            # warning until the final sanitizer knows which supported effort actually reaches the wire.
+            _UNPROJECTABLE_DISABLE_WARNED.add(warning_key)
             logger.warning(
                 "reasoning_effort: none cannot be sent for %s — its route accepts only %s, so the model's "
                 "default effort stays on (an omitted reasoning field does not disable it).",
@@ -371,8 +383,21 @@ def _is_openai_api_origin(base_url: Any) -> bool:
 
 
 def _is_official_openai_responses_route(model: Any, base_url: Any) -> bool:
-    """Astra on the canonical API origin only."""
-    return is_astra_model(model) and _is_openai_api_origin(base_url)
+    """A supported GPT-6 model on OpenAI's official Responses host family.
+
+    The shared host predicate accepts genuine regional subdomains while rejecting lookalike
+    domains and path-segment spoofs.
+    """
+    bare_model = str(model or "").strip().lower().rsplit("/", 1)[-1]
+    is_supported_gpt6 = is_astra_model(model) or any(
+        bare_model == slug or bare_model.startswith(f"{slug}-")
+        for slug in ("gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna")
+    )
+    if not is_supported_gpt6:
+        return False
+    from hermes_cli.providers import is_official_openai_host
+
+    return is_official_openai_host(str(base_url or ""))
 
 
 def _codex_efforts_for_route(model: Any, base_url: Any, *, is_codex_backend: bool = False) -> tuple[str, ...]:
@@ -394,23 +419,70 @@ def _codex_efforts_for_route(model: Any, base_url: Any, *, is_codex_backend: boo
     return codex_supported_efforts(str(model or ""))
 
 
-def _sanitize_astra_request_kwargs(kwargs: dict[str, Any], model: Any, base_url: Any) -> None:
-    """Astra's official-API contract, applied AFTER ``request_overrides`` so an override can't put a
-    rejected field back on the wire: ``reasoning.effort`` is ``low..max`` only (``none``/``minimal``
-    400), sampling and logprob knobs are rejected, and cache lifetime is fixed server-side (the
-    pre-5.6 ``prompt_cache_retention`` knob is dropped here; ``prompt_cache_options`` is already
-    stripped on every route by ``build_kwargs``)."""
-    if not _is_official_openai_responses_route(model, base_url):
+def _sanitize_official_openai_gpt6_request_kwargs(
+    kwargs: dict[str, Any], model: Any, base_url: Any, *, explicit_reasoning_disabled: bool = False,
+) -> None:
+    """Apply official GPT-6 request constraints after caller overrides.
+
+    Sampling and logprob controls are unsupported while reasoning is active. GPT-6 Sol/Luna retain
+    them only at effective effort ``none``; GPT-6.1 Sol and Astra clamp ``none`` to ``low``. GPT-6
+    uses ``prompt_cache_options.ttl`` instead of the legacy prompt-cache-retention field.
+    """
+    wire_model = kwargs.get("model", model)
+    if not _is_official_openai_responses_route(wire_model, base_url):
         return
+
+    supported_efforts = codex_supported_efforts(str(wire_model or ""))
     reasoning = kwargs.get("reasoning")
+    projecting_explicit_disable = explicit_reasoning_disabled and not isinstance(reasoning, dict)
+    if isinstance(reasoning, dict):
+        # ``kwargs.update(request_overrides)`` is intentionally shallow. Own the nested mapping before
+        # clamping so preparing one request cannot rewrite the caller's settings for later requests.
+        reasoning = dict(reasoning)
+        kwargs["reasoning"] = reasoning
+    elif projecting_explicit_disable:
+        # The generic builder omits reasoning when disabled. Preserve that explicit intent until the
+        # model-specific vocabulary can retain ``none`` (GPT-6 Sol/Luna) or clamp it to ``low``
+        # (GPT-6.1 Sol/Astra).
+        reasoning = {"effort": "none"}
+        kwargs["reasoning"] = reasoning
+
+    effective_effort = "low" if is_astra_model(wire_model) else "medium"
     if isinstance(reasoning, dict):
         requested = str(reasoning.get("effort") or "").strip().lower()
-        reasoning["effort"] = clamp_effort(requested, CODEX_ASTRA_EFFORTS) if requested else "low"
-    for key in ("temperature", "top_p", "top_logprobs", "logprobs", "prompt_cache_retention"):
-        kwargs.pop(key, None)
-    include = kwargs.get("include")
-    if isinstance(include, list):
-        kwargs["include"] = [item for item in include if "logprob" not in str(item).lower()]
+        if requested:
+            effective_effort = clamp_effort(requested, supported_efforts)
+            reasoning["effort"] = effective_effort
+        elif is_astra_model(wire_model):
+            reasoning["effort"] = effective_effort
+
+    if projecting_explicit_disable and effective_effort != "none":
+        warning_key = (str(wire_model or model), f"projected:{effective_effort}")
+        if warning_key not in _UNPROJECTABLE_DISABLE_WARNED:
+            _UNPROJECTABLE_DISABLE_WARNED.add(warning_key)
+            logger.warning(
+                "reasoning_effort: none cannot be sent for %s — its route accepts only %s, so the request "
+                "uses %s (the lowest supported effort) instead.",
+                wire_model, ", ".join(str(level) for level in supported_efforts), effective_effort,
+            )
+
+    if effective_effort != "none":
+        for key in ("temperature", "top_p", "top_logprobs", "logprobs"):
+            kwargs.pop(key, None)
+        include = kwargs.get("include")
+        if isinstance(include, list):
+            kwargs["include"] = [item for item in include if "logprob" not in str(item).lower()]
+
+    kwargs.pop("prompt_cache_retention", None)
+
+
+def _sanitize_astra_request_kwargs(
+    kwargs: dict[str, Any], model: Any, base_url: Any, *, explicit_reasoning_disabled: bool = False,
+) -> None:
+    """Compatibility entry point used by the auxiliary Responses path."""
+    _sanitize_official_openai_gpt6_request_kwargs(
+        kwargs, model, base_url, explicit_reasoning_disabled=explicit_reasoning_disabled,
+    )
 
 
 def _content_cache_key(instructions: str, tools: Optional[list[dict[str, Any]]], scope_id: str = "") -> Optional[str]:
@@ -700,6 +772,10 @@ class ResponsesApiTransport(ProviderTransport):
         native_compaction_active = _native_compaction_active(context_management)
 
         reasoning_effort, reasoning_enabled = _resolve_reasoning(model, params)
+        reasoning_config = params.get("reasoning_config")
+        explicit_reasoning_disabled = (
+            isinstance(reasoning_config, dict) and reasoning_config.get("enabled") is False
+        )
         response_tools, self._last_wire_aliases = _alias_wire_tools(
             self.convert_tools(tools), params, is_xai_responses, is_codex_backend,
         )
@@ -769,7 +845,10 @@ class ResponsesApiTransport(ProviderTransport):
                     "(use request_overrides={'extra_body': ...} for wire-only fields)."
                 )
 
-        _sanitize_astra_request_kwargs(kwargs, model, params.get("base_url"))
+        _sanitize_official_openai_gpt6_request_kwargs(
+            kwargs, model, params.get("base_url"),
+            explicit_reasoning_disabled=explicit_reasoning_disabled,
+        )
 
         _bound_prompt_cache_key_field(kwargs)
 

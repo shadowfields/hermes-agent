@@ -80,11 +80,14 @@ class TestValidateOutput:
 
 class TestPromptPlumbing:
     def test_contract_block_carries_schema(self):
-        out = append_output_contract("base context", ADDRESS_SCHEMA)
-        assert "base context" in out
+        out = append_output_contract("Respond in JSON.", ADDRESS_SCHEMA)
+        assert "Respond in JSON." in out
         assert "OUTPUT CONTRACT" in out
         assert '"city"' in out
 
+    def test_contract_block_without_prior_constraints(self):
+        out = append_output_contract(None, ADDRESS_SCHEMA)
+        assert "OUTPUT CONTRACT" in out
 
     def test_retry_message_carries_verbatim_errors(self):
         msg = build_retry_message(["'city' is a required property"])
@@ -346,8 +349,7 @@ class TestDelegateTaskDispatch:
         assert "output_schema" in payload["error"]
 
     def test_child_receives_contract_and_schema_attr(self):
-        """The built child carries the schema attr and its context gains
-        the output-contract block."""
+        """The built child carries the schema attr and a trusted output contract."""
         captured = {}
 
         def fake_build(**kwargs):
@@ -379,6 +381,7 @@ class TestDelegateTaskDispatch:
                 parent_agent=_make_mock_parent(),
             )
         payload = json.loads(out)
-        assert "OUTPUT CONTRACT" in (captured.get("context") or "")
+        assert captured.get("context") == "base context"
+        assert "OUTPUT CONTRACT" in (captured.get("constraints") or "")
         results = payload.get("results") or []
         assert results and results[0].get("schema_valid") is True

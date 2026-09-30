@@ -1017,7 +1017,35 @@ def test_specify_happy_path(client, monkeypatch):
     _patch_specifier_response(
         monkeypatch,
         content=jsonlib.dumps(
-            {"title": "Polished", "body": "**Goal**\nDo the thing."}
+            {
+                "title": "Polished",
+                "body": """**Goal**
+Do the thing.
+
+**Known context**
+The source task is a one-liner.
+
+**Approach**
+- Complete the requested task.
+
+**Dependencies**
+None identified.
+
+**Acceptance criteria**
+- The task is complete.
+
+**Acceptance evidence**
+Show the completed result.
+
+**Stop conditions**
+Stop if required input is missing.
+
+**Unverified / unknowns**
+None.
+
+**Out of scope**
+Unrelated board changes.""",
+            }
         ),
     )
 
@@ -1067,7 +1095,37 @@ def test_specify_resolves_each_profiles_key_under_multiplex(kanban_home, tmp_pat
         seen.append(ss.get_secret("KANBAN_AUX_SCOPE_TEST_KEY"))
         resp = MagicMock()
         resp.choices = [MagicMock()]
-        resp.choices[0].message.content = json.dumps({"title": "Polished", "body": "**Goal**\nDo it."})
+        resp.choices[0].message.content = json.dumps(
+            {
+                "title": "Polished",
+                "body": """**Goal**
+Do it.
+
+**Known context**
+The source task is a one-liner.
+
+**Approach**
+- Complete the requested task.
+
+**Dependencies**
+None identified.
+
+**Acceptance criteria**
+- The task is complete.
+
+**Acceptance evidence**
+Show the completed result.
+
+**Stop conditions**
+Stop if required input is missing.
+
+**Unverified / unknowns**
+None.
+
+**Out of scope**
+Unrelated board changes.""",
+            }
+        )
         return resp
 
     monkeypatch.setattr("agent.auxiliary_client.call_llm", fake_call_llm)

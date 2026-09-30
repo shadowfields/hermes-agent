@@ -279,6 +279,9 @@ DEFAULT_CONFIG = {
         # vision_analyze and prepend the description. vision_analyze stays a tool regardless.
         "image_input_mode": "auto",
         "disabled_toolsets": [],
+        # Main-agent effort: none|minimal|low|medium|high|xhigh|max|ultra.
+        # Empty keeps the selected model/provider default.
+        "reasoning_effort": "",
         # Model name (any reasonable spelling) -> effort level; overrides agent.reasoning_effort
         # when the current model matches. Edit in config.yaml (no CLI support: dots in keys).
         "reasoning_overrides": {},
@@ -770,7 +773,10 @@ DEFAULT_CONFIG = {
         # /review reviewer: a full subagent on the async delegation rail, credentials resolved like
         # delegation.provider pins. "auto" + "" = main agent's model. api_mode forces transport:
         # chat_completions | anthropic_messages | codex_responses.
-        "review": {"provider": "auto", "model": "", "base_url": "", "api_key": "", "api_mode": ""},
+        "review": {
+            "provider": "auto", "model": "", "base_url": "", "api_key": "", "api_mode": "",
+            "reasoning_effort": "",
+        },
         "mcp": _aux(30),
         # prefer_fast_model opts in to the provider fast tier; auto otherwise = main model.
         "title_generation": {
@@ -1895,8 +1901,9 @@ DEFAULT_CONFIG = {
         "review_dispatch": True,
         # Seconds between dispatcher ticks. Lower = snappier pickup; higher = less SQL pressure.
         "dispatch_interval_seconds": 60,
-        # Auto-block after this many consecutive non-success attempts (spawn_failed, timed_out,
-        # crashed) for the same task/profile. Reassignment resets the streak.
+        # Bound consecutive non-success attempts. Worker spawn/time-out/crash failures block the
+        # task/profile streak; auto-decompose failures park that triage task's automatic retries.
+        # Reassignment resets only the worker streak; editing/moving triage input resets decomposition.
         "failure_limit": 2,
         # Worker stdout/stderr log rotation at spawn time (2 MiB + one backup). Raise to keep more
         # early failure evidence from long-running workers.

@@ -634,14 +634,19 @@ _DEEPSEEK_FLASH_VISION: Dict[str, Any] = {
     "family": "deepseek-flash",
 }
 
+_OPENAI_GPT6_CAPABILITIES: Dict[str, Any] = {
+    "limit": {"context": 1_050_000, "output": 128_000},
+    "modalities": {"input": ["text", "image"], "output": ["text"]},
+    "tool_call": True,
+    "reasoning": True,
+    "family": "gpt-6",
+}
+
 _BUILTIN_MODEL_METADATA: Dict[Tuple[str, str], Dict[str, Any]] = {
-    ("openai", "gpt-6-astra"): {
-        "limit": {"context": 1_050_000, "output": 128_000},
-        "modalities": {"input": ["text", "image"], "output": ["text"]},
-        "tool_call": True,
-        "reasoning": True,
-        "family": "gpt-6",
-    },
+    ("openai", "gpt-6.1-sol"): _OPENAI_GPT6_CAPABILITIES,
+    ("openai", "gpt-6-sol"): _OPENAI_GPT6_CAPABILITIES,
+    ("openai", "gpt-6-luna"): _OPENAI_GPT6_CAPABILITIES,
+    ("openai", "gpt-6-astra"): _OPENAI_GPT6_CAPABILITIES,
     # Native DeepSeek V4.1-Flash is multimodal (https://api-docs.deepseek.com/guides/vision).
     # models.dev lagged the 2026-09-10 rename; without this, a cold/empty cache treats
     # ``deepseek-flash`` as unknown → image_input_mode falls through to lossy text.
@@ -794,7 +799,17 @@ def _builtin_model_metadata(
 ) -> Optional[Dict[str, Any]]:
     """Built-in metadata for a provider/model pair, if Hermes has a vendor-specific entry."""
     provider_key = _models_dev_id(provider, config=config) or (provider or "").strip()
-    return _BUILTIN_MODEL_METADATA.get((provider_key, (model or "").strip().lower()))
+    model_key = (model or "").strip().lower()
+    metadata = _BUILTIN_MODEL_METADATA.get((provider_key, model_key))
+    if metadata is not None:
+        return metadata
+    # OpenAI's GPT-6 ``-pro`` SKUs share the base tier's capability envelope.
+    # Resolve the alias without registering it in a picker; Astra remains explicit-only.
+    if provider_key == "openai" and model_key.endswith("-pro"):
+        base = _BUILTIN_MODEL_METADATA.get((provider_key, model_key.removesuffix("-pro")))
+        if base is not None and base.get("family") == "gpt-6":
+            return base
+    return None
 
 
 def _relay_vision_marker_metadata(provider: str, model: str) -> Optional[Dict[str, Any]]:

@@ -55,6 +55,64 @@ class TestCodexBuildKwargs:
         )
         assert kw.get("reasoning") == ({"effort": expected} if expected else None)
 
+    @pytest.mark.parametrize(
+        ("model", "requested_effort", "effective_effort"),
+        [
+            ("gpt-6.1-sol", "none", "low"),
+            ("gpt-6-sol", "medium", "medium"),
+            ("gpt-6-luna", "medium", "medium"),
+        ],
+    )
+    def test_official_gpt6_reasoning_removes_unsupported_sampling_controls(
+        self, transport, model, requested_effort, effective_effort,
+    ):
+        kw = transport.build_kwargs(
+            model=model,
+            messages=[{"role": "user", "content": "Hi"}],
+            tools=[],
+            base_url="https://api.openai.com/v1",
+            request_overrides={
+                "reasoning": {"effort": requested_effort},
+                "temperature": 0.4,
+                "top_p": 0.9,
+                "top_logprobs": 5,
+                "logprobs": True,
+                "prompt_cache_retention": "24h",
+                "include": ["reasoning.encrypted_content", "message.output_text.logprobs"],
+            },
+        )
+
+        assert kw["reasoning"]["effort"] == effective_effort
+        assert kw["include"] == ["reasoning.encrypted_content"]
+        for unsupported in ("temperature", "top_p", "top_logprobs", "logprobs"):
+            assert unsupported not in kw
+        assert "prompt_cache_retention" not in kw
+
+    def test_official_gpt6_luna_none_preserves_sampling_controls(self, transport):
+        kw = transport.build_kwargs(
+            model="gpt-6-luna",
+            messages=[{"role": "user", "content": "Hi"}],
+            tools=[],
+            base_url="https://api.openai.com/v1",
+            request_overrides={
+                "reasoning": {"effort": "none"},
+                "temperature": 0.4,
+                "top_p": 0.9,
+                "top_logprobs": 5,
+                "logprobs": True,
+                "prompt_cache_retention": "24h",
+                "include": ["reasoning.encrypted_content", "message.output_text.logprobs"],
+            },
+        )
+
+        assert kw["reasoning"]["effort"] == "none"
+        assert kw["temperature"] == 0.4
+        assert kw["top_p"] == 0.9
+        assert kw["top_logprobs"] == 5
+        assert kw["logprobs"] is True
+        assert kw["include"] == ["reasoning.encrypted_content", "message.output_text.logprobs"]
+        assert "prompt_cache_retention" not in kw
+
     def test_astra_direct_request_applies_model_contract_after_overrides(self, transport):
         kw = transport.build_kwargs(
             model="gpt-6-astra",
@@ -102,9 +160,20 @@ class TestCodexBuildKwargs:
 
         assert kw["reasoning"]["effort"] == effort
 
-    @pytest.mark.parametrize("base_url", ["https://responses.example.com/v1", "https://evil.api.openai.com/v1"])
-    def test_astra_contract_is_exact_host_only(self, transport, base_url):
-        """Proxies and lookalike subdomains keep the generic Responses contract (effort passes through)."""
+    @pytest.mark.parametrize(
+        ("base_url", "expected_effort", "keeps_temperature"),
+        [
+            ("https://api.openai.com/v1", "low", False),
+            ("https://us.api.openai.com/v1", "low", False),
+            ("https://eu.api.openai.com/v1", "low", False),
+            ("https://api.openai.com.attacker.test/v1", "none", True),
+            ("https://fooapi.openai.com/v1", "none", True),
+            ("https://responses.example.com/v1", "none", True),
+        ],
+    )
+    def test_gpt6_contract_follows_official_openai_host_family(
+        self, transport, base_url, expected_effort, keeps_temperature,
+    ):
         kw = transport.build_kwargs(
             model="gpt-6-astra",
             messages=[{"role": "user", "content": "Hi"}],
@@ -114,8 +183,62 @@ class TestCodexBuildKwargs:
             request_overrides={"temperature": 0.4},
         )
 
-        assert kw["reasoning"]["effort"] == "none"
-        assert kw["temperature"] == 0.4
+        assert kw["reasoning"]["effort"] == expected_effort
+        assert (kw.get("temperature") == 0.4) is keeps_temperature
+
+    @pytest.mark.parametrize(
+        ("model", "expected_effort", "keeps_temperature"),
+        [
+            ("gpt-6-astra", "low", False),
+            ("gpt-6.1-sol", "low", False),
+            ("gpt-6-sol", "none", True),
+            ("gpt-6-luna", "none", True),
+        ],
+    )
+    def test_explicit_reasoning_disable_survives_main_responses_builder(
+        self, transport, model, expected_effort, keeps_temperature,
+    ):
+        kw = transport.build_kwargs(
+            model=model,
+            messages=[{"role": "user", "content": "Hi"}],
+            tools=[],
+            base_url="https://api.openai.com/v1",
+            reasoning_config={"enabled": False},
+            request_overrides={"temperature": 0.4},
+        )
+
+        assert kw["reasoning"]["effort"] == expected_effort
+        assert (kw.get("temperature") == 0.4) is keeps_temperature
+
+    def test_gpt6_sanitizer_does_not_mutate_shared_request_overrides(self, transport):
+        request_overrides = {
+            "reasoning": {"effort": "none"},
+            "temperature": 0.4,
+        }
+
+        sol = transport.build_kwargs(
+            model="gpt-6.1-sol",
+            messages=[{"role": "user", "content": "Hi"}],
+            tools=[],
+            base_url="https://api.openai.com/v1",
+            request_overrides=request_overrides,
+        )
+        luna = transport.build_kwargs(
+            model="gpt-6-luna",
+            messages=[{"role": "user", "content": "Hi"}],
+            tools=[],
+            base_url="https://api.openai.com/v1",
+            request_overrides=request_overrides,
+        )
+
+        assert request_overrides == {
+            "reasoning": {"effort": "none"},
+            "temperature": 0.4,
+        }
+        assert sol["reasoning"]["effort"] == "low"
+        assert "temperature" not in sol
+        assert luna["reasoning"]["effort"] == "none"
+        assert luna["temperature"] == 0.4
 
     @pytest.mark.parametrize(
         "base_url,is_codex",
@@ -1977,9 +2100,9 @@ def test_text_verbosity_reaches_responses_body_only_when_configured(transport):
 
 class TestOpenAIReasoningWireProjection:
     """Explicit ``reasoning_effort: none`` and non-reasoning OpenAI models on the Responses wire
-    (#75227, #76255): a disable is sent as ``effort: none`` where the model accepts it — omitting the
-    field leaves the model's default effort on — and chat-era models on api.openai.com, which 400 on any
-    ``reasoning`` key, get no ``reasoning`` field at all."""
+    (#75227, #76255): a disable is sent as ``effort: none`` where the model accepts it, clamped to the
+    lowest supported effort where it does not, and omitted for chat-era models on api.openai.com, which
+    400 on any ``reasoning`` key."""
 
     OPENAI = "https://api.openai.com/v1"
 
@@ -1988,24 +2111,51 @@ class TestOpenAIReasoningWireProjection:
                                     base_url=base_url, reasoning_config=reasoning_config)
         return kw.get("reasoning")
 
-    def test_explicit_none_is_sent_and_unset_keeps_the_default(self, transport):
+    def test_explicit_disable_projects_onto_the_model_wire_vocabulary(self, transport):
         assert self._reasoning(transport, "gpt-5.6-sol", {"enabled": False}) == {"effort": "none"}
         assert self._reasoning(transport, "gpt-5.6-sol", None) == {"effort": "medium", "summary": "auto"}
-        # Astra's vocabulary has no ``none``: nothing to send, never an escalated level.
-        assert self._reasoning(transport, "gpt-6-astra", {"enabled": False}) is None
+        assert self._reasoning(transport, "gpt-6-astra", {"enabled": False}) == {"effort": "low"}
+        assert self._reasoning(transport, "gpt-6.1-sol", {"enabled": False}) == {"effort": "low"}
+        assert self._reasoning(transport, "gpt-6-luna", {"enabled": False}) == {"effort": "none"}
 
-    def test_disable_the_route_cannot_express_is_reported_once(self, transport, caplog):
-        """#75227: a disable the vocabulary cannot carry (Astra has no ``none``) is reported as an unsupported
-        configuration — the model's default effort stays on — instead of silently omitted; once per model."""
+    def test_disable_clamped_to_the_route_floor_is_reported_once(self, transport, caplog):
+        """Astra cannot carry ``none``; report the actual ``low`` projection once per model."""
         import logging
         from agent.transports import codex as codex_transport
-        codex_transport._UNPROJECTABLE_DISABLE_WARNED.discard("gpt-6-astra")
+        codex_transport._UNPROJECTABLE_DISABLE_WARNED.discard(("gpt-6-astra", "projected:low"))
         with caplog.at_level(logging.WARNING, logger="agent.transports.codex"):
             for _ in range(2):
-                assert self._reasoning(transport, "gpt-6-astra", {"enabled": False}) is None
+                assert self._reasoning(transport, "gpt-6-astra", {"enabled": False}) == {"effort": "low"}
         warned = [r.getMessage() for r in caplog.records
                   if r.name == "agent.transports.codex" and r.levelno >= logging.WARNING]
-        assert len(warned) == 1 and "gpt-6-astra" in warned[0], caplog.text
+        assert len(warned) == 1, caplog.text
+        assert "gpt-6-astra" in warned[0]
+        assert "uses low (the lowest supported effort) instead" in warned[0]
+        assert "default effort stays on" not in warned[0]
+
+    def test_disable_warning_deduplication_is_scoped_to_the_wire_outcome(self, transport, caplog):
+        """A relay omission must not suppress the later official-API clamp warning for the same model."""
+        import logging
+        from agent.transports import codex as codex_transport
+
+        model = "gpt-6.1-sol"
+        codex_transport._UNPROJECTABLE_DISABLE_WARNED.discard((model, "omitted"))
+        codex_transport._UNPROJECTABLE_DISABLE_WARNED.discard((model, "projected:low"))
+        with caplog.at_level(logging.WARNING, logger="agent.transports.codex"):
+            for _ in range(2):
+                assert self._reasoning(
+                    transport, model, {"enabled": False}, "https://responses.example.com/v1"
+                ) is None
+                assert self._reasoning(transport, model, {"enabled": False}) == {"effort": "low"}
+
+        warned = [
+            record.getMessage()
+            for record in caplog.records
+            if record.name == "agent.transports.codex" and record.levelno >= logging.WARNING
+        ]
+        assert len(warned) == 2, caplog.text
+        assert any("default effort stays on" in message for message in warned)
+        assert any("uses low (the lowest supported effort) instead" in message for message in warned)
 
     @pytest.mark.parametrize("model", ["gpt-4o-mini", "gpt-4.1-mini", "openai/gpt-4o", "ft:gpt-4o-mini:acme::abc1"])
     def test_chat_era_openai_models_get_no_reasoning_field_on_the_official_origin(self, transport, model):

@@ -43,26 +43,15 @@ import { PluginSlot } from "@/plugins";
 import { ModelPickerDialog } from "@/components/ModelPickerDialog";
 import { ModelReloadConfirm } from "@/components/ModelReloadConfirm";
 import { errorMessage } from "@/lib/api-error";
+import {
+  resolveAuxiliaryTaskMetadata,
+  type AuxiliaryTaskMetadata,
+} from "@/lib/auxiliary-tasks";
 
 const PERIODS = [
   { label: "7d", days: 7 },
   { label: "30d", days: 30 },
   { label: "90d", days: 90 },
-] as const;
-
-// Must match _AUX_TASK_SLOTS in hermes_cli/web_server.py.
-const AUX_TASKS: readonly { key: string; label: string; hint: string }[] = [
-  { key: "vision", label: "Vision", hint: "Image analysis" },
-  { key: "compression", label: "Compression", hint: "Context compaction" },
-  { key: "skills_hub", label: "Skills Hub", hint: "Skill search" },
-  { key: "approval", label: "Approval", hint: "Smart auto-approve" },
-  { key: "mcp", label: "MCP", hint: "MCP tool routing" },
-  { key: "title_generation", label: "Title Gen", hint: "Session titles" },
-  { key: "review", label: "Review", hint: "/review subagent" },
-  { key: "triage_specifier", label: "Triage Specifier", hint: "Kanban spec fleshing" },
-  { key: "kanban_decomposer", label: "Kanban Decomposer", hint: "Task decomposition" },
-  { key: "profile_describer", label: "Profile Describer", hint: "Auto profile descriptions" },
-  { key: "curator", label: "Curator", hint: "Skill-usage review" },
 ] as const;
 
 function formatTokens(n: number): string {
@@ -207,6 +196,7 @@ function UseAsMenu({
   model,
   isMain,
   mainAuxTask,
+  auxiliaryTasks,
   onAssigned,
 }: {
   provider: string;
@@ -215,6 +205,7 @@ function UseAsMenu({
   isMain: boolean;
   /** If this model is assigned to a specific aux task, that task's key. */
   mainAuxTask: string | null;
+  auxiliaryTasks: readonly AuxiliaryTaskMetadata[];
   onAssigned(): void;
 }) {
   const [open, setOpen] = useState(false);
@@ -319,7 +310,7 @@ function UseAsMenu({
             <span>All auxiliary tasks</span>
           </button>
 
-          {AUX_TASKS.map((t) => (
+          {auxiliaryTasks.map((t) => (
             <button
               key={t.key}
               type="button"
@@ -372,6 +363,7 @@ function ModelCard({
   rank,
   main,
   aux,
+  auxiliaryTasks,
   onAssigned,
   showTokens,
 }: {
@@ -379,6 +371,7 @@ function ModelCard({
   rank: number;
   main: { provider: string; model: string } | null;
   aux: AuxiliaryTaskAssignment[];
+  auxiliaryTasks: readonly AuxiliaryTaskMetadata[];
   onAssigned(): void;
   showTokens: boolean;
 }) {
@@ -468,6 +461,7 @@ function ModelCard({
               model={entry.model}
               isMain={isMain}
               mainAuxTask={mainAuxTask}
+              auxiliaryTasks={auxiliaryTasks}
               onAssigned={onAssigned}
             />
           </div>
@@ -563,6 +557,7 @@ function AuxiliaryTasksModal({
   const [resetBusy, setResetBusy] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const modalRef = useModalBehavior({ open: true, onClose });
+  const auxiliaryTasks = resolveAuxiliaryTaskMetadata(aux?.tasks);
 
   const resetAllAux = async () => {
     setConfirmReset(false);
@@ -628,7 +623,7 @@ function AuxiliaryTasksModal({
         </header>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-1">
-          {AUX_TASKS.map((t) => {
+          {auxiliaryTasks.map((t) => {
             const cur = aux?.tasks.find((a) => a.task === t.key);
             const isAuto =
               !cur || cur.provider === "auto" || !cur.provider;
@@ -669,7 +664,7 @@ function AuxiliaryTasksModal({
             loader={api.getModelOptions}
             alwaysGlobal
             title={`Set Auxiliary: ${
-              AUX_TASKS.find((t) => t.key === picker.task)?.label ??
+              auxiliaryTasks.find((t) => t.key === picker.task)?.label ??
               picker.task
             }`}
             onApply={async ({ provider, model, confirmExpensiveModel }) => {
@@ -980,6 +975,7 @@ function ModelSettingsPanel({
   const auxOverrideCount = aux?.tasks.filter(
     (a) => a.provider && a.provider !== "auto",
   ).length ?? 0;
+  const auxiliaryTasks = resolveAuxiliaryTaskMetadata(aux?.tasks);
 
   return (
     <Card className="min-w-0 max-w-full overflow-hidden">
@@ -1029,8 +1025,8 @@ function ModelSettingsPanel({
             </div>
             <div className="text-xs font-mono text-text-secondary truncate">
               {auxOverrideCount > 0
-                ? `${auxOverrideCount} override${auxOverrideCount > 1 ? "s" : ""} · ${AUX_TASKS.length - auxOverrideCount} auto`
-                : `${AUX_TASKS.length} tasks · all auto`}
+                ? `${auxOverrideCount} override${auxOverrideCount > 1 ? "s" : ""} · ${Math.max(0, auxiliaryTasks.length - auxOverrideCount)} auto`
+                : `${auxiliaryTasks.length} tasks · all auto`}
             </div>
           </div>
           <Button
@@ -1137,6 +1133,7 @@ export default function ModelsPage() {
   const [showTokens, setShowTokens] = useState(false);
   const { t } = useI18n();
   const { setAfterTitle, setEnd } = usePageHeader();
+  const auxiliaryTasks = resolveAuxiliaryTaskMetadata(aux?.tasks);
 
   useEffect(() => {
     api
@@ -1341,6 +1338,7 @@ export default function ModelsPage() {
                   rank={i + 1}
                   main={aux?.main ?? null}
                   aux={aux?.tasks ?? []}
+                  auxiliaryTasks={auxiliaryTasks}
                   onAssigned={onAssigned}
                   showTokens={showTokens}
                 />

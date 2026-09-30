@@ -1,10 +1,11 @@
 """Structured-output schema helpers for delegate_task.
 
 Optional per-task ``output_schema`` (a JSON Schema object): the child gets an
-OUTPUT CONTRACT block appended to its context, the parent validates the final
-answer with jsonschema, and on failure sends exactly ONE bounded retry turn
-carrying the validation errors verbatim (more retries make frontier models
-drop fields that were right the first time; the schema is never re-pasted).
+OUTPUT CONTRACT block appended to its trusted delegated constraints, the parent
+validates the final answer with jsonschema, and on failure sends exactly ONE
+bounded retry turn carrying the validation errors verbatim (more retries make
+frontier models drop fields that were right the first time; the schema is never
+re-pasted).
 """
 
 from __future__ import annotations
@@ -42,8 +43,8 @@ def coerce_output_schema(raw: Any) -> Tuple[Optional[Dict[str, Any]], Optional[s
     return raw, None
 
 
-def append_output_contract(context: Optional[str], schema: Dict[str, Any]) -> str:
-    """Append the explicit output contract block to a child's context."""
+def append_output_contract(constraints: Optional[str], schema: Dict[str, Any]) -> str:
+    """Append the explicit output contract block to a child's trusted constraints."""
     try:
         schema_text = json.dumps(schema, indent=2, ensure_ascii=False)
     except (TypeError, ValueError):
@@ -53,7 +54,7 @@ def append_output_contract(context: Optional[str], schema: Dict[str, Any]) -> st
              "Schema — no prose before or after it, no code fence, no explanation. Anything else "
              "costs a correction turn and, if it fails again, is handed to the caller unvalidated.\n"
              f"{schema_text}")
-    base = (context or "").rstrip()
+    base = (constraints or "").rstrip()
     return f"{base}\n\n{block}" if base else block
 
 
@@ -112,4 +113,13 @@ def build_retry_message(errors: List[str]) -> str:
     return ("Your previous final response was rejected by the output contract "
             "validator. Validation errors:\n" f"{error_block}\n\n"
             "Reply with ONLY the corrected JSON object matching the OUTPUT "
-            "CONTRACT schema from your task context. No prose, no explanations.")
+            "CONTRACT schema from your delegated constraints. No prose, no explanations.")
+
+
+# ---- BEGIN PLUGIN-COMPAT (revert-scheduled; see COMPAT_MANIFEST.md) ----
+# Names external plugins imported from this module before the Sep 2026 decomposition.
+# Internal code MUST NOT use these (scripts/check_compat_pointers.py fails CI if it does).
+# The whole block is removed by reverting the commit that added it.
+
+MAX_SCHEMA_RETRIES = 1
+# ---- END PLUGIN-COMPAT ----

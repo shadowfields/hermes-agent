@@ -147,10 +147,21 @@ def _load_review_credentials_cfg() -> Optional[Dict[str, Any]]:
     if not isinstance(review, dict):
         return None
 
-    cfg = {k: str(review.get(k) or "").strip() for k in ("provider", "model", "base_url", "api_key", "api_mode")}
+    cfg = {
+        k: str(review.get(k) or "").strip()
+        for k in ("provider", "model", "base_url", "api_key", "api_mode")
+    }
+    raw_effort = review.get("reasoning_effort")
+    cfg["reasoning_effort"] = False if raw_effort is False else str(raw_effort or "").strip()
     if cfg["provider"].lower() == "auto":
         cfg["provider"] = ""
-    if not (cfg["provider"] or cfg["model"] or cfg["base_url"]):
+    if not (
+        cfg["provider"]
+        or cfg["model"]
+        or cfg["base_url"]
+        or cfg["reasoning_effort"]
+        or cfg["reasoning_effort"] is False
+    ):
         return None
     return cfg
 

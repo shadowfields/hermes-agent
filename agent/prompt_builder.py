@@ -346,13 +346,11 @@ KANBAN_GUIDANCE = (
 )
 
 TOOL_USE_ENFORCEMENT_GUIDANCE = (
-    "# Tool-use enforcement\n"
+    "Tool use:\n"
     "You MUST use your tools to take action — do not describe what you would do or plan to do without actually doing "
     "it. When you say you will perform an action (e.g. 'I will run the tests', 'Let me check the file', 'I will create "
     "the project'), you MUST immediately make the corresponding tool call in the same response. Never end your turn "
     "with a promise of future action — execute it now.\n"
-    "Keep working until the task is actually complete. Do not stop with a summary of what you plan to do next time. If "
-    "you have tools available that can accomplish the task, use them instead of telling the user what you would do.\n"
     "Every response should either (a) contain tool calls that make progress, or (b) deliver a final result to the "
     "user. Responses that only describe intentions without acting are not acceptable."
 )
@@ -378,18 +376,19 @@ EXECUTION_GUIDANCE_MODELS = (
     "deepseek", "kimi", "qwen", "glm", "minimax", "mimo", "mistral", "muse",
 )
 
-# Universal "finish the job" guidance (ALL models): don't stop after a stub, never
-# fabricate output when the real path is blocked. Ships in every cached prompt — keep tight.
+# Universal execution contract (ALL models): completion, alternate-strategy, and
+# evidence rules. The separately gated constants below extend this one contract;
+# they deliberately carry no competing Markdown headings. All text is static so
+# the assembled system-prompt prefix remains byte-stable for a conversation.
 TASK_COMPLETION_GUIDANCE = (
-    "# Finishing the job\n"
-    "When the user asks you to build, run, or verify something, the deliverable is a working artifact backed by real "
-    "tool output — not a description of one. Do not stop after writing a stub, a plan, or a single command. Keep "
-    "working until you have actually exercised the code or produced the requested result, then report what real "
-    "execution returned.\n"
-    "If a tool, install, or network call fails and blocks the real path, say so directly and try an alternative "
-    "(different package manager, different approach, ask the user). NEVER substitute plausible-looking fabricated "
-    "output (made-up data, invented file contents, synthesised API responses) for results you couldn't actually "
-    "produce. Reporting a blocker honestly is always better than inventing a result."
+    "# Execution contract\n"
+    "Use tools whenever they improve correctness, completeness, or grounding. For build, run, or verification work, "
+    "the deliverable is a working artifact backed by real tool output, not a description of one. Continue until the "
+    "task is complete and the result is verified; do not stop after a stub, plan, or single command.\n"
+    "If a tool result is empty, partial, or suspiciously narrow, retry with a broader query or a different strategy "
+    "before concluding. If a tool, install, or network call blocks the real path, report the blocker and try a viable "
+    "alternative. Never substitute fabricated output, invented file contents, or synthesised responses for a result "
+    "you did not produce."
 )
 
 ASYNC_HANDOFF_GUIDANCE = (
@@ -418,10 +417,10 @@ ASYNC_HANDOFF_GUIDANCE = (
 # cline/cline#11514 ("encourage parallel tool calls"), adapted from Cline's TypeScript tool-surface guidance
 # to hermes-agent's Python prompt-assembly architecture.
 PARALLEL_TOOL_CALL_GUIDANCE = (
-    "# Parallel tool calls\n"
+    "Tool batching:\n"
     "When you need several pieces of information that don't depend on each other, request them together in a "
-    "single response instead of one tool call per turn. Independent reads, searches, web fetches, and "
-    "read-only commands should be batched into the same assistant turn — the runtime executes independent "
+    "single response instead of one tool call per turn. Batch independent reads, searches, web fetches, and "
+    "read-only commands into the same assistant turn — the runtime executes independent "
     "calls concurrently, and batching avoids resending the whole conversation on every extra round-trip.\n"
     "Only serialize calls when a later call genuinely depends on an earlier call's result (e.g. you must "
     "read a file before you can patch it). When in doubt and the calls are independent, batch them."
@@ -440,14 +439,7 @@ PARALLEL_TOOL_CALL_GUIDANCE = (
 # "repairing" malformed identifiers, and claiming completeness despite count mismatches — exactly the
 # failure modes this block targets.
 OPENAI_MODEL_EXECUTION_GUIDANCE = (
-    "# Execution discipline\n"
-    "<tool_persistence>\n"
-    "- Use tools whenever they improve correctness, completeness, or grounding.\n"
-    "- Do not stop early when another tool call would materially improve the result.\n"
-    "- If a tool returns empty, partial, or suspiciously narrow results, retry with a broader or different query or "
-    "strategy before concluding.\n"
-    "- Keep calling tools until: (1) the task is complete, AND (2) you have verified the result.\n"
-    "</tool_persistence>\n\n"
+    "Execution discipline for tool-capable models:\n"
     "<mandatory_tool_use>\n"
     "NEVER answer these from memory or mental computation — ALWAYS use a tool:\n"
     "- Arithmetic, math, calculations → use terminal or execute_code\n"
@@ -460,31 +452,27 @@ OPENAI_MODEL_EXECUTION_GUIDANCE = (
     "Your memory and user profile describe the USER, not the system you are running on. The execution environment may "
     "differ from what the user profile says about their personal setup.\n"
     "</mandatory_tool_use>\n\n"
-    "<act_dont_ask>\n"
-    "When a question has an obvious default interpretation, act on it immediately instead of asking for clarification. "
-    "Examples:\n"
-    "- 'Is port 443 open?' → check THIS machine (don't ask 'open where?')\n"
-    "- 'What OS am I running?' → check the live system (don't use user profile)\n"
-    "- 'What time is it?' → run `date` (don't guess)\n"
-    "Only ask for clarification when the ambiguity genuinely changes what tool you would call.\n"
-    "</act_dont_ask>\n\n"
     "<prerequisite_checks>\n"
     "- Before taking an action, check whether prerequisite discovery, lookup, or context-gathering steps are needed.\n"
     "- Do not skip prerequisite steps just because the final action seems obvious.\n"
     "- If a task depends on output from a prior step, resolve that dependency first.\n"
     "</prerequisite_checks>\n\n"
+    "<side_effects>\n"
+    "- Before side effects such as file writes, commands, or API calls, confirm only when authorization, target, or "
+    "scope is ambiguous. When all three are clear, act without unnecessary "
+    "confirmation.\n"
+    "</side_effects>\n\n"
     "<verification>\n"
     "Before finalizing your response:\n"
     "- Correctness: does the output satisfy every stated requirement?\n"
     "- Grounding: are factual claims backed by tool outputs or provided context?\n"
     "- Formatting: does the output match the requested format or schema?\n"
-    "- Safety: if the next step has side effects (file writes, commands, API calls), confirm scope before executing.\n"
     "- Completion: 'done' means every named acceptance criterion is verified — never a plausible subset. Completing "
     "your plan is not itself the answer; the requested output must appear in your response.\n"
     "</verification>\n\n"
     "<external_state_verification>\n"
-    "- After any state-changing write to an external system (API call, message post, record update), verify the effect "
-    "by reading back the exact target before claiming success — a successful tool call is not a successful task. Do "
+    "- After any state-changing write to an external system (API call, message post, record update), read back the "
+    "exact target before claiming success — a successful tool call is not a successful task. Do "
     "NOT re-verify internal file edits a tool already confirmed.\n"
     "- Declared totals in responses (total, reply_count, has_more, '...N more') are hard assertions. If your "
     "enumerated count disagrees, re-fetch or parse programmatically — never finalize on 'go with what I have'.\n"
@@ -492,9 +480,9 @@ OPENAI_MODEL_EXECUTION_GUIDANCE = (
     "contradict intent.\n"
     "</external_state_verification>\n\n"
     "<literal_preservation>\n"
-    "- Preserve identifiers, commands, and values exactly as given — never 'repair' or normalize a token that fails a "
-    "stated format. A successful lookup does not validate a malformed source token; validate format first, then look "
-    "up.\n"
+    "- Preserve literal identifiers, commands, and values exactly as given — never 'repair' or normalize a token that "
+    "fails a stated format. A successful lookup does not validate a malformed source token; validate format first, "
+    "then look up.\n"
     "</literal_preservation>\n\n"
     "<missing_context>\n"
     "- If required context is missing, do NOT guess or hallucinate an answer.\n"

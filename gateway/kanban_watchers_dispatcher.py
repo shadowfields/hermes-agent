@@ -235,7 +235,12 @@ class _KanbanDispatcher:
                         conn.close()
         return False
 
-    def auto_decompose_tick(self, auto_decompose_per_tick: int) -> int:
+    def auto_decompose_tick(
+        self,
+        auto_decompose_per_tick: int,
+        *,
+        now: Optional[int] = None,
+    ) -> int:
         """Auto-decompose up to N triage tasks across all boards into ready workgraphs.
 
         Runs before dispatch fans out; the per-tick cap keeps a bulk triage
@@ -246,6 +251,7 @@ class _KanbanDispatcher:
         except Exception as exc:  # pragma: no cover
             logger.warning("kanban auto-decompose: import failed (%s); skipping", exc)
             return 0
+        tick_now = int(time.time()) if now is None else int(now)
         attempted = 0
         successes = 0
         with _default_profile_secret_scope():
@@ -258,15 +264,30 @@ class _KanbanDispatcher:
                 try:
                     os.environ["HERMES_KANBAN_BOARD"] = slug
                     try:
-                        triage_ids = _decomp.list_triage_ids()
+                        # Skip tasks the unblock-loop breaker parked for a human:
+                        # a fanout=false decompose would promote them straight back
+                        # to ready and restart the loop.
+                        triage_ids = _decomp.list_triage_ids(
+                            exclude_loop_detected=True,
+                            auto_retry_due_only=True,
+                            now=tick_now,
+                        )
                     except Exception as exc:
                         logger.debug("kanban auto-decompose: list_triage_ids failed on board %s (%s)", slug, exc)
                         triage_ids = []
                     for tid in triage_ids:
                         if attempted >= auto_decompose_per_tick:
                             break
+                        result = self._decompose_one(
+                            _decomp,
+                            slug,
+                            tid,
+                            now=tick_now,
+                        )
+                        if result is None:
+                            continue
                         attempted += 1
-                        successes += self._decompose_one(_decomp, slug, tid)
+                        successes += result
                 finally:
                     if prev_env is None:
                         os.environ.pop("HERMES_KANBAN_BOARD", None)
@@ -274,23 +295,86 @@ class _KanbanDispatcher:
                         os.environ["HERMES_KANBAN_BOARD"] = prev_env
         return successes
 
-    @staticmethod
-    def _decompose_one(_decomp: Any, slug: str, tid: str) -> int:
-        """Decompose one triage task; returns 1 on success, 0 otherwise."""
+    def _decompose_one(self, _decomp: Any, slug: str, tid: str, *, now: int) -> Optional[int]:
+        """Return 1/0 for a spent attempt, or None when eligibility changed."""
+        scope_factory = getattr(_decomp, "auto_decompose_retry_scope", None)
+        retry_scope = (
+            scope_factory(now)
+            if callable(scope_factory)
+            else contextlib.nullcontext()
+        )
         try:
-            outcome = _decomp.decompose_task(tid, author="auto-decomposer")
+            with retry_scope:
+                outcome = _decomp.decompose_task(tid, author="auto-decomposer")
         except Exception:
             logger.exception("kanban auto-decompose: decompose_task crashed on %s", tid)
             return 0
+        if getattr(outcome, "auto_retry_skipped", False):
+            logger.debug(
+                "kanban auto-decompose [%s]: %s became ineligible before the call: %s",
+                slug,
+                tid,
+                outcome.reason,
+            )
+            return None
         if not outcome.ok:
-            # Common no-op reasons (no aux client) must not spam logs every tick.
-            logger.debug("kanban auto-decompose [%s]: %s skipped: %s", slug, tid, outcome.reason)
+            parked = self._record_auto_decompose_failure(
+                _decomp,
+                slug,
+                tid,
+                outcome.reason,
+                now=now,
+                input_token=getattr(outcome, "input_token", None),
+            )
+            if parked is None:
+                logger.debug(
+                    "kanban auto-decompose [%s]: %s failure state was not recorded "
+                    "(task changed or persistence failed)",
+                    slug,
+                    tid,
+                )
+                return 0
+            log = logger.warning if parked else logger.debug
+            log(
+                "kanban auto-decompose [%s]: %s %s: %s",
+                slug,
+                tid,
+                "parked after retry limit" if parked else "cooling down after failure",
+                outcome.reason,
+            )
             return 0
         if outcome.fanout and outcome.child_ids:
             logger.info("kanban auto-decompose [%s]: %s → %d children", slug, tid, len(outcome.child_ids))
         else:
             logger.info("kanban auto-decompose [%s]: %s → single task (no fanout)", slug, tid)
         return 1
+
+    def _record_auto_decompose_failure(
+        self,
+        _decomp: Any,
+        slug: str,
+        tid: str,
+        reason: str,
+        *,
+        now: int,
+        input_token: Any,
+    ) -> Optional[bool]:
+        """Best-effort durable accounting; a bookkeeping error never kills the tick."""
+        try:
+            return _decomp.record_auto_decompose_failure(
+                tid,
+                reason,
+                failure_limit=self.settings.failure_limit,
+                now=now,
+                expected_input_token=input_token,
+            )
+        except Exception:
+            logger.exception(
+                "kanban auto-decompose [%s]: failed to persist retry state for %s",
+                slug,
+                tid,
+            )
+            return None
 
 
 @contextlib.contextmanager

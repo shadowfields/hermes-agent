@@ -352,7 +352,54 @@ describe('ModelSettings', () => {
     expect(screen.queryByRole('switch')).toBeNull()
   })
 
-  it('edits auxiliary reasoning effort and applies it with the assignment', async () => {
+  it('renders the auxiliary task rows', async () => {
+    await renderModelSettings()
+
+    expect(await screen.findByText('Vision')).toBeTruthy()
+    // #97297 — the three canonical slots the backend serves must have rows too.
+    expect(screen.getByText('Triage specifier')).toBeTruthy()
+    expect(screen.getByText('Kanban decomposer')).toBeTruthy()
+    expect(screen.getByText('Profile describer')).toBeTruthy()
+    expect(screen.getAllByText('auto · use main model').length).toBeGreaterThan(0)
+  })
+
+  it('renders and configures a plugin auxiliary task returned by the backend registry', async () => {
+    getAuxiliaryModels.mockResolvedValueOnce({
+      main: { provider: 'nous', model: 'hermes-4' },
+      tasks: [
+        { task: 'vision', provider: 'auto', model: '', base_url: '' },
+        {
+          task: 'teams_summary',
+          display_name: 'Teams summary',
+          description: 'Grounded Microsoft Teams meeting summaries',
+          provider: 'auto',
+          model: '',
+          base_url: ''
+        }
+      ]
+    })
+
+    await renderModelSettings()
+
+    expect(await screen.findByText('Teams summary')).toBeTruthy()
+    expect(screen.getByText('Grounded Microsoft Teams meeting summaries')).toBeTruthy()
+
+    const row = screen.getByText('Teams summary').closest('[id="aux-task-teams_summary"]')
+    const setToMain = row?.querySelector<HTMLButtonElement>('button')
+    expect(setToMain).toBeTruthy()
+    fireEvent.click(setToMain!)
+
+    await waitFor(() =>
+      expect(setModelAssignment).toHaveBeenCalledWith({
+        model: 'hermes-4',
+        provider: 'nous',
+        scope: 'auxiliary',
+        task: 'teams_summary'
+      })
+    )
+  })
+
+  it('edits auxiliary reasoning effort below the selected model and applies it with the assignment', async () => {
     getAuxiliaryModels.mockResolvedValueOnce({
       main: { provider: 'nous', model: 'hermes-4' },
       tasks: [{ task: 'vision', provider: 'nous', model: 'hermes-4', base_url: '', reasoning_effort: null }]

@@ -3162,7 +3162,7 @@ class TestCodexAdapterReasoningTranslation:
     """
 
     @staticmethod
-    def _build_adapter():
+    def _build_adapter(base_url="", model="gpt-5.3-codex"):
         """Build a _CodexCompletionsAdapter with a mocked responses.create()."""
         from agent.auxiliary_client import _CodexCompletionsAdapter
         from types import SimpleNamespace
@@ -3204,8 +3204,9 @@ class TestCodexAdapterReasoningTranslation:
             return _FakeCreateStream()
 
         real_client = MagicMock()
+        real_client.base_url = base_url
         real_client.responses.create = _create
-        adapter = _CodexCompletionsAdapter(real_client, "gpt-5.3-codex")
+        adapter = _CodexCompletionsAdapter(real_client, model)
         return adapter, captured_kwargs
 
 
@@ -3245,6 +3246,29 @@ class TestCodexAdapterReasoningTranslation:
         adapter.create(messages=[{"role": "user", "content": "hi"}])
         assert "reasoning" not in captured
         assert "include" not in captured
+
+    @pytest.mark.parametrize(
+        ("model", "expected_effort"),
+        [
+            ("gpt-6-astra", "low"),
+            ("gpt-6.1-sol", "low"),
+            ("gpt-6-luna", "none"),
+        ],
+    )
+    def test_explicit_reasoning_disable_survives_auxiliary_responses_builder(
+        self, model, expected_effort,
+    ):
+        adapter, captured = self._build_adapter(
+            base_url="https://api.openai.com/v1",
+            model=model,
+        )
+
+        adapter.create(
+            messages=[{"role": "user", "content": "hi"}],
+            extra_body={"reasoning": {"enabled": False}},
+        )
+
+        assert captured.get("reasoning") == {"effort": expected_effort}
 
 
 

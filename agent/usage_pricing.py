@@ -163,13 +163,6 @@ _GOOGLE_URL = "https://ai.google.dev/pricing"
 _OPUS = ("5.00", "25.00", "0.50", "6.25")
 _SONNET = ("3.00", "15.00", "0.30", "3.75")
 _SNAPSHOTS: tuple[tuple[str, Optional[str], str, dict], ...] = (
-    # OpenAI GPT-5.6 (Sol/Terra/Luna). Cache write = 1.25x input, cache read =
-    # 0.10x input. "-pro" high-effort modes bill at the same per-token rates
-    # (aliased below); "Sol Fast mode" is a separate tier, not covered.
-    ("openai", "https://openai.com/index/previewing-gpt-5-6-sol/", "openai-gpt-5.6-2026-07", {
-        "gpt-5.6-sol": ("5.00", "30.00", "0.50", "6.25"), "gpt-5.6-terra": ("2.50", "15.00", "0.25", "3.125"),
-        "gpt-5.6-luna": ("1.00", "6.00", "0.10", "1.25"),
-    }),
     # Claude 4.5/4.6/4.7/4.8 Opus share $5/$25 (new tokenizer, up to 35% more tokens).
     ("anthropic", _ANTHROPIC_URL, "anthropic-pricing-2026-05", {
         ("claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-7-20250507", "claude-opus-4-6",
@@ -256,6 +249,28 @@ for _provider, _url, _version, _rows in _SNAPSHOTS:
         for _model in ((_models,) if isinstance(_models, str) else _models):
             _OFFICIAL_DOCS_PRICING[(_provider, _model)] = _entry
 del _SNAPSHOTS, _provider, _url, _version, _rows, _models, _rates, _entry, _model
+
+# GPT-5.6 reasoning models use whole-request pricing above 272K prompt tokens:
+# 2x input/cache and 1.5x output. Cache writes are 1.25x uncached input at both
+# tiers. Keep each row linked to its model card so a future price change can be
+# updated independently instead of assuming family-wide rates.
+for _model, _rates in {
+    "gpt-5.6-sol": ("4.00", "20.00", "0.40", "5.00"),
+    "gpt-5.6-terra": ("2.00", "12.00", "0.20", "2.50"),
+    "gpt-5.6-luna": ("0.20", "1.20", "0.02", "0.25"),
+}.items():
+    _input, _output, _cache_read, _cache_write = map(Decimal, _rates)
+    _OFFICIAL_DOCS_PRICING[("openai", _model)] = _snap(
+        *_rates,
+        url=f"https://developers.openai.com/api/docs/models/{_model}",
+        version=f"openai-{_model}-2026-09",
+        tier_threshold_tokens=272_000,
+        input_cost_per_million_above=_input * 2,
+        output_cost_per_million_above=_output * Decimal("1.5"),
+        cache_read_cost_per_million_above=_cache_read * 2,
+        cache_write_cost_per_million_above=_cache_write * 2,
+    )
+del _model, _rates, _input, _output, _cache_read, _cache_write
 
 # GPT-6 Astra uses whole-request pricing above the 272K prompt tier.  Keep this
 # account-gated model out of generic static catalogs, but retain published billing

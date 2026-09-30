@@ -1003,6 +1003,35 @@ class TestBuildSkillsSystemPromptConditional:
 
 
 
+def test_default_gpt_like_fragments_form_one_execution_contract():
+    from agent.prompt_builder import (
+        OPENAI_MODEL_EXECUTION_GUIDANCE,
+        PARALLEL_TOOL_CALL_GUIDANCE,
+        TASK_COMPLETION_GUIDANCE,
+        TOOL_USE_ENFORCEMENT_GUIDANCE,
+    )
+    from agent.system_prompt import _guidance_parts
+
+    agent = SimpleNamespace(
+        valid_tool_names={"terminal"},
+        _task_completion_guidance=True,
+        _parallel_tool_call_guidance=True,
+        _tool_use_enforcement=True,
+        _execution_guidance=True,
+        _kanban_worker_guidance="",
+        model="gpt-contract-test",
+    )
+
+    parts = [part for part in _guidance_parts(agent) if part]
+    assert parts.count(TASK_COMPLETION_GUIDANCE) == 1
+    assert parts.count(PARALLEL_TOOL_CALL_GUIDANCE) == 1
+    assert parts.count(TOOL_USE_ENFORCEMENT_GUIDANCE) == 1
+    assert parts.count(OPENAI_MODEL_EXECUTION_GUIDANCE) == 1
+    assert parts.index(TASK_COMPLETION_GUIDANCE) < parts.index(PARALLEL_TOOL_CALL_GUIDANCE)
+    assert parts.index(PARALLEL_TOOL_CALL_GUIDANCE) < parts.index(TOOL_USE_ENFORCEMENT_GUIDANCE)
+    assert parts.index(TOOL_USE_ENFORCEMENT_GUIDANCE) < parts.index(OPENAI_MODEL_EXECUTION_GUIDANCE)
+    assert sum(part.lstrip().startswith("# ") for part in parts) == 1
+
 # =========================================================================
 # Budget warning history stripping
 # =========================================================================
