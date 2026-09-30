@@ -91,14 +91,65 @@ def test_build_review_task_includes_excerpt_and_prompt():
         {"role": "assistant", "text": "PR #99 opened"},
     ]
     prompt = "focus on security\n" + "keep these instructions intact " * 20
-    goal, context = build_review_task(snap, prompt)
-    assert goal.startswith("Review: focus on security ")
-    assert len(goal) <= 80 and "\n" not in goal
-    assert goal.endswith("…")
-    assert re_mod._REVIEW_GOAL in context
+    goal, context, constraints = build_review_task(snap, prompt)
+    assert goal == re_mod._REVIEW_GOAL
     assert "[USER]" in context and "[PRIMARY AGENT]" in context
     assert "PR #99 opened" in context
-    assert prompt.strip() in context
+    assert prompt.strip() not in context
+    assert prompt.strip() in constraints
+
+
+def test_review_task_keeps_instructions_authoritative_and_evidence_fallible():
+    """The assembled child prompt/turn must preserve every binding review instruction.
+
+    The goal is the child's first user turn.  Constraints enter the trusted
+    delegated-constraints system block; only the transcript belongs in the
+    fallible reference-context block.
+    """
+    from tools.delegate_tool import _build_child_system_prompt
+
+    snap = [
+        {"role": "user", "text": "Ship PR #99 after the focused tests pass."},
+        {"role": "assistant", "text": "PR #99 is open at https://example.test/pull/99"},
+    ]
+    directive = (
+        "Inspect authorization boundaries and treat a missing regression test as blocking. "
+        "Do not approve until the final marker REVIEW-DIRECTIVE-END is addressed."
+    )
+
+    goal, context, constraints = build_review_task(
+        snap,
+        directive,
+        ["hermes-agent-dev", "github-pr-workflow"],
+    )
+    child_system_prompt = _build_child_system_prompt(
+        goal,
+        context,
+        constraints=constraints,
+    )
+
+    # Full task contract: no display-label truncation in the authoritative user turn.
+    assert goal == re_mod._REVIEW_GOAL
+    assert len(goal) > 80
+    assert "REVIEW-DIRECTIVE-END" not in goal
+    assert goal not in child_system_prompt  # single-copy delivery via the user turn
+
+    trusted_json = child_system_prompt.split(
+        "DELEGATED_CONSTRAINTS_JSON:\n", 1
+    )[1].split("\n\n", 1)[0]
+    trusted = json.loads(trusted_json)["constraints"]
+    assert directive in trusted
+    assert "hermes-agent-dev, github-pr-workflow" in trusted
+    assert "skill_view" in trusted
+
+    reference_json = child_system_prompt.split(
+        "REFERENCE_CONTEXT_JSON:\n", 1
+    )[1].split("\n\n", 1)[0]
+    reference = json.loads(reference_json)["context"]
+    assert "PR #99 is open" in reference
+    assert directive not in reference
+    assert "skill_view" not in reference
+    assert re_mod._REVIEW_GOAL not in reference
 
 # ---------------------------------------------------------------------------
 # auxiliary.review credential resolution
@@ -317,11 +368,11 @@ def test_start_review_dispatches_background_and_completes(monkeypatch):
     result = start_review(_fake_parent(), msgs, "check the tests")
     assert result["status"] == "dispatched"
 
-    # The reviewer briefing carries the conversation excerpt + user prompt.
+    # Conversation evidence remains fallible; user instructions remain trusted.
     assert "PR #77 opened" in built["context"]
-    assert "check the tests" in built["context"]
-    assert built["goal"].startswith("Review: ")
-    assert re_mod._REVIEW_GOAL in built["context"]
+    assert "check the tests" not in built["context"]
+    assert "check the tests" in built["constraints"]
+    assert built["goal"] == re_mod._REVIEW_GOAL
 
     # The completion re-enters via the shared queue like any subagent.
     deadline = time.monotonic() + 5.0
@@ -402,13 +453,16 @@ def test_collect_skills_caps_at_limit():
     cap = inspect.signature(collect_parent_loaded_skills).parameters["limit"].default
     assert len(collect_parent_loaded_skills(parent, msgs)) == cap < 15
 
-def test_briefing_includes_loaded_skills_instruction():
+def test_constraints_include_loaded_skills_instruction():
     snap = [{"role": "user", "text": "review my PR"}]
-    _, context = build_review_task(snap, "", ["hermes-agent-dev", "xitter"])
-    assert "hermes-agent-dev, xitter" in context
-    assert "skill_view" in context
+    _, context, constraints = build_review_task(
+        snap, "", ["hermes-agent-dev", "xitter"]
+    )
+    assert "hermes-agent-dev, xitter" not in context
+    assert "hermes-agent-dev, xitter" in constraints
+    assert "skill_view" in constraints
 
-def test_start_review_threads_loaded_skills_into_context(monkeypatch):
+def test_start_review_threads_loaded_skills_into_constraints(monkeypatch):
     import tools.delegate_tool as dt
 
     fake_child = MagicMock()
@@ -445,8 +499,9 @@ def test_start_review_threads_loaded_skills_into_context(monkeypatch):
     ]
     result = start_review(parent, msgs, "")
     assert result["status"] == "dispatched"
-    assert "hermes-agent-dev" in built["context"]
-    assert "skill_view" in built["context"]
+    assert "hermes-agent-dev" not in built["context"]
+    assert "hermes-agent-dev" in built["constraints"]
+    assert "skill_view" in built["constraints"]
 
 # ---------------------------------------------------------------------------
 # Workspace context files — ALL subagents (reviewer included) get AGENTS.md

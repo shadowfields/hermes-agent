@@ -94,6 +94,37 @@ class TestPromptPlumbing:
         assert "'city' is a required property" in msg
         assert "JSON" in msg
 
+    def test_schema_is_sole_output_contract_in_assembled_child_prompt(self):
+        """A schema-bound child must not also be ordered to emit prose sections."""
+        from tools.delegate_tool import _build_child_system_prompt
+
+        constraints = append_output_contract(
+            "Read only; support every populated field with observed evidence.",
+            ADDRESS_SCHEMA,
+        )
+        prompt = _build_child_system_prompt(
+            "Inspect the release metadata",
+            "Observed tag: v1.2.3",
+            constraints=constraints,
+        )
+
+        assert "OUTPUT CONTRACT (machine-validated)" in prompt
+        trusted_json = prompt.split(
+            "DELEGATED_CONSTRAINTS_JSON:\n", 1
+        )[1].split("\n\n", 1)[0]
+        assert '"city"' in json.loads(trusted_json)["constraints"]
+        assert "Return a concise final report with these exact sections" not in prompt
+        assert "- Outcome:" not in prompt
+        assert "- Evidence:" not in prompt
+        assert "- Files changed:" not in prompt
+        assert "- Unverified/blockers:" not in prompt
+        assert "lead with outcomes" not in prompt
+
+        # Trust/evidence and workspace-path safety still apply independently
+        # of the machine-validated output shape.
+        assert "Do not claim completion" in prompt
+        assert "Never assume a repository lives at /workspace/" in prompt
+
 
 # ---------------------------------------------------------------------------
 # Tool-schema surface (one-time static field)

@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+OUTPUT_CONTRACT_HEADER = "OUTPUT CONTRACT (machine-validated):"
+
 
 def coerce_output_schema(raw: Any) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """``(schema, None)`` when usable, ``(None, error)`` when not; ``None`` input
@@ -49,13 +51,18 @@ def append_output_contract(constraints: Optional[str], schema: Dict[str, Any]) -
         schema_text = json.dumps(schema, indent=2, ensure_ascii=False)
     except (TypeError, ValueError):
         schema_text = str(schema)
-    block = ("OUTPUT CONTRACT (machine-validated):\n"
+    block = (f"{OUTPUT_CONTRACT_HEADER}\n"
              "Your FINAL response must be ONLY the JSON value that validates against this JSON "
              "Schema — no prose before or after it, no code fence, no explanation. Anything else "
              "costs a correction turn and, if it fails again, is handed to the caller unvalidated.\n"
              f"{schema_text}")
     base = (constraints or "").rstrip()
     return f"{base}\n\n{block}" if base else block
+
+
+def has_output_contract(constraints: Optional[str]) -> bool:
+    """Whether trusted constraints contain this module's schema contract."""
+    return OUTPUT_CONTRACT_HEADER in str(constraints or "")
 
 
 def extract_json_candidate(text: str) -> str:

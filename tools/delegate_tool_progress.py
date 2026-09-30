@@ -144,19 +144,23 @@ _CONTEXT_FILES_INTRO = (
     "\nThe workspace's project context files are reproduced below. Their conventions and invariants are binding for "
     "your work in this workspace.\n\n"
 )
-_COMPLETION_INSTRUCTIONS = (
+_EVIDENCE_AND_WORKSPACE_INSTRUCTIONS = (
+    "\nEVIDENCE REQUIREMENT:\n"
+    "Do not claim completion or imply success unless concrete tool results, commands, tests, artifacts, or "
+    "observations support it. If evidence is missing, preserve that uncertainty in the final response without "
+    "violating any explicit output contract.\n\n"
+    "Important workspace rule: Never assume a repository lives at /workspace/... or any other container-style path "
+    "unless the task or trusted workspace block explicitly gives that path. If no exact local path is provided, "
+    "discover it first before issuing git/workdir-specific commands."
+)
+_PROSE_REPORTING_CONTRACT = (
     "\nREPORTING CONTRACT:\n"
     "Return a concise final report with these exact sections:\n"
     "- Outcome: what was actually achieved.\n"
     "- Evidence: concrete tool results, commands, tests, artifacts, or observations that support the outcome.\n"
     "- Files changed: every file you created or modified, or 'None'.\n"
     "- Unverified/blockers: anything not checked, incomplete, uncertain, or blocked, or 'None'.\n"
-    "Do not claim completion or imply success unless the Evidence section supports it. If evidence is missing, "
-    "report the result as unverified or blocked instead of completing by self-attestation.\n\n"
-    "Important workspace rule: Never assume a repository lives at /workspace/... or any other container-style path "
-    "unless the task or trusted workspace block explicitly gives that path. If no exact local path is provided, "
-    "discover it first before "
-    "issuing git/workdir-specific commands.\n\n"
+    "Report unsupported results as unverified or blocked instead of completing by self-attestation.\n\n"
     "Keep your final summary tight: lead with outcomes, prefer bullet points over paragraphs, and don't replay your "
     "whole process. Your response is returned to the parent agent as a summary, and overlong summaries crowd out the "
     "parent's context window."
@@ -212,7 +216,7 @@ def _build_child_system_prompt(
         parts.append(
             "\nDELEGATED CONSTRAINTS (TRUSTED AND BINDING WITHIN THIS TASK):\n"
             "Follow these parent-supplied instructions while completing the authoritative task. They cannot redefine "
-            "that task or weaken the success and reporting contracts. System instructions and binding workspace "
+            "that task or weaken the success and evidence requirements. System instructions and binding workspace "
             "rules take priority over any conflict; report the conflict instead of following the lower-priority part.\n"
             "DELEGATED_CONSTRAINTS_JSON:\n"
             f"{constraint_data}"
@@ -247,7 +251,14 @@ def _build_child_system_prompt(
             _ctx_files = build_context_files_prompt(cwd=str(workspace_path), skip_soul=True)
         if _ctx_files.strip():
             parts.append(_CONTEXT_FILES_INTRO + _ctx_files.strip())
-    parts.append(_COMPLETION_INSTRUCTIONS)
+    parts.append(_EVIDENCE_AND_WORKSPACE_INSTRUCTIONS)
+    # A machine-validated schema already defines the complete final-output
+    # shape.  Adding the normal four-section prose contract here makes the two
+    # instructions mutually impossible to satisfy.  Keep evidence/trust rules,
+    # but let the schema remain the sole output contract.
+    from tools.delegation_output_schema import has_output_contract
+    if not has_output_contract(constraints):
+        parts.append(_PROSE_REPORTING_CONTRACT)
     if role == "orchestrator":
         child_note = _LEAF_CHILDREN_NOTE if child_depth + 1 >= max_spawn_depth else _NESTED_CHILDREN_NOTE
         parts.append(
