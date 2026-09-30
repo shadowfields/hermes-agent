@@ -194,7 +194,7 @@ def test_shipped_arms_resolve_to_exact_git_commits_and_prompt_blobs():
         "git-commit-sha1:4546cd40ecb764dd265c38923b227b572b355d32"
     )
     assert study["arms"]["proposed"]["source_commit"] == (
-        "git-commit-sha1:a5b9586e654ea7c70d5d85714b8bd4a4eb01ed75"
+        "git-commit-sha1:dc476e7734d86a2ae6e5664403da3fa303921791"
     )
 
 

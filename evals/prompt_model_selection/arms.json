@@ -79,7 +79,7 @@
     },
     "proposed": {
       "description": "Candidate quality-first routing; validate before applying broadly.",
-      "source_commit": "git-commit-sha1:a5b9586e654ea7c70d5d85714b8bd4a4eb01ed75",
+      "source_commit": "git-commit-sha1:dc476e7734d86a2ae6e5664403da3fa303921791",
       "routes": {
         "curator": {
           "provider": "anthropic",
@@ -104,8 +104,8 @@
           "max_iterations": 80,
           "prompt_sources": {
             "tools/delegate_tool.py": "git-blob-sha1:cd1030e4e469869815cd16ce7f2398dbbe4079cc",
-            "tools/delegate_tool_progress.py": "git-blob-sha1:78cad138cd641294bb7f83586d303c7756684682",
-            "tools/delegation_output_schema.py": "git-blob-sha1:7d65dea2a436036b6467b38843bc6642d96c3e1e"
+            "tools/delegate_tool_progress.py": "git-blob-sha1:6c4c71bf53b3b2b064c95886a3b6a56e4aed462f",
+            "tools/delegation_output_schema.py": "git-blob-sha1:bcb25be4d788109d8d0a4d72e0bfcd566f6b915d"
           }
         },
         "moa_aggregation": {
@@ -145,7 +145,7 @@
           "model": "claude-sonnet-5",
           "reasoning_effort": "medium",
           "prompt_sources": {
-            "hermes_cli/kanban_decompose.py": "git-blob-sha1:8645f411b85d845af243064e7c9278c1e4f1a324"
+            "hermes_cli/kanban_decompose.py": "git-blob-sha1:a0b70e4f98b4f607b405149c8cc2afc73afa6c5c"
           }
         }
       }
